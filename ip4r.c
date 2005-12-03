@@ -1,8 +1,12 @@
+/* $Id: ip4r.c,v 1.3 2005-12-03 23:48:57 andrewsn Exp $ */
 /*
   New type 'ip4' used to represent a single IPv4 address efficiently
 
   New type 'ip4r' used to represent a range of IPv4 addresses, along
   with support for GiST and rtree indexing of the type.
+
+  V0.1: updates for 8.1. add some documentation.
+  WARNING: semantics of &<< and &>> changed to track changes in rtree.
 
   V0.08: SQL changes only; functions returning "internal" must take
   at least one parameter of type "internal".
@@ -27,7 +31,7 @@
   broken somehow; the resulting indexes are bloated with excessive
   numbers of single-value leaf pages.
 
-  this code by andrew@supernews.net Oct 2004 - Jan 2005
+  this code by andrew@supernews.net Oct 2004 - Dec 2005
 
   [derived from 'ipr' by:  
    Steve Atkins <steve@blighty.com> August 2003, derived from the 'seg'
@@ -334,13 +338,13 @@ bool ip4r_left_internal(IP4R *left, IP4R *right)
 }
 
 static inline
-bool ip4r_overleft_internal(IP4R *left, IP4R *right)
+bool ip4r_extends_left_of_internal(IP4R *left, IP4R *right)
 {
     return (left->lower < right->lower);
 }
 
 static inline
-bool ip4r_overright_internal(IP4R *left, IP4R *right)
+bool ip4r_extends_right_of_internal(IP4R *left, IP4R *right)
 {
     return (left->upper > right->upper);
 }
@@ -359,11 +363,11 @@ bool ip4r_overright_internal(IP4R *left, IP4R *right)
 #define PG_GETARG_IP4(n) PG_GETARG_UINT32(n)
 #define PG_RETURN_IP4(x) PG_RETURN_UINT32(x)
 
-#if MAJOR_VERSION == 8
+#if IP4R_PGVER >= 8000000 && IP4R_PGVER < 9000000
 #define INET_IPADDR ipaddr
 #define GISTENTRYCOUNT(v) ((v)->n)
 #define GISTENTRYVEC(v) ((v)->vector)
-#elif MAJOR_VERSION == 7
+#elif IP4R_PGVER >= 7000000 && IP4R_PGVER < 8000000
 #define INET_IPADDR ip_addr
 typedef bytea GistEntryVector;
 #define GISTENTRYCOUNT(v) ( (VARSIZE((v)) - VARHDRSZ) / sizeof(GISTENTRY) )
@@ -938,7 +942,11 @@ PG_FUNCTION_INFO_V1(ip4r_left_overlap);
 Datum 
 ip4r_left_overlap(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_BOOL( ip4r_overleft_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
+#if IP4R_PGVER < 8001000
+    PG_RETURN_BOOL( ip4r_extends_left_of_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
+#else
+    PG_RETURN_BOOL(! ip4r_extends_right_of_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
+#endif
 }
 
 PG_FUNCTION_INFO_V1(ip4r_right_of);
@@ -952,7 +960,11 @@ PG_FUNCTION_INFO_V1(ip4r_right_overlap);
 Datum
 ip4r_right_overlap(PG_FUNCTION_ARGS)
 {
-    PG_RETURN_BOOL( ip4r_overright_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
+#if IP4R_PGVER < 8001000
+    PG_RETURN_BOOL( ip4r_extends_right_of_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
+#else
+    PG_RETURN_BOOL(! ip4r_extends_left_of_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
+#endif
 }
 
 
@@ -1197,8 +1209,6 @@ gip4r_penalty(PG_FUNCTION_ARGS)
 }
 
 
-#if 1
-
 /* Helper functions for picksplit. We might need to sort a list of
  * ranges by size; these are for that.
  */
@@ -1354,158 +1364,6 @@ gip4r_picksplit(PG_FUNCTION_ARGS)
 }
 
 #undef ADDLIST
-
-#else 
-
-/* This version is disabled because it is badly wrong somewhere; it
- * tends to produce a lot of index pages with only a single value
- * for reasons which I do not yet understand.
- */
-
-/*
-** The GiST PickSplit method for IP ranges
-** We use Guttman's poly time split algorithm
-** There's apparently a linear time algorithm available for this, but
-** I don't understand it yet.
-*/
-PG_FUNCTION_INFO_V1(gip4r_picksplit);
-Datum
-gip4r_picksplit(PG_FUNCTION_ARGS)
-{
-    bytea *entryvec = (bytea *) PG_GETARG_POINTER(0);
-    GIST_SPLITVEC *v = (GIST_SPLITVEC *) PG_GETARG_POINTER(1);
-    OffsetNumber i, j;
-    IP4R *datum_alpha, *datum_beta;
-    IP4R *datum_l, *datum_r;
-    IP4R union_d, union_dl, union_dr;
-    IP4R inter_d;
-    bool firsttime;
-    double size_alpha, size_beta, size_union, size_inter;
-    double size_waste, waste;
-    double size_l, size_r;
-    int	nbytes;
-    OffsetNumber seed_1 = 0, seed_2 = 0;
-    OffsetNumber *left, *right;
-    OffsetNumber maxoff;
-  
-#ifdef GIST_DEBUG
-    fprintf(stderr, "picksplit\n");
-#endif
-  
-    maxoff = ((VARSIZE(entryvec) - VARHDRSZ) / sizeof(GISTENTRY)) - 2;
-    nbytes = (maxoff + 2) * sizeof(OffsetNumber);
-    v->spl_left = (OffsetNumber *) palloc(nbytes);
-    v->spl_right = (OffsetNumber *) palloc(nbytes);
-  
-    firsttime = true;
-    waste = 0.0;
-  
-    for (i = FirstOffsetNumber; i < maxoff; i = OffsetNumberNext(i))
-    {
-	datum_alpha = (IP4R *) DatumGetPointer(((GISTENTRY *) VARDATA(entryvec))[i].key);
-	for (j = OffsetNumberNext(i); j <= maxoff; j = OffsetNumberNext(j))
-	{
-	    datum_beta = (IP4R *) DatumGetPointer(((GISTENTRY *) VARDATA(entryvec))[j].key);
-	  
-	    /* compute the wasted space by unioning these guys */
-	    /* size_waste = size_union - size_inter; */
-	    size_union = ip4r_metric(ip4r_union_internal(datum_alpha, datum_beta, &union_d));
-	    size_inter = ip4r_metric(ip4r_inter_internal(datum_alpha, datum_beta, &inter_d));
-	    size_waste = size_union - size_inter;
-	  
-	    /*
-	     * are these a more promising split that what we've already
-	     * seen?
-	     */
-	  
-	    if (size_waste > waste || firsttime)
-	    {
-		waste = size_waste;
-		seed_1 = i;
-		seed_2 = j;
-		firsttime = false;
-	    }
-	}
-    }
-  
-    left = v->spl_left;
-    v->spl_nleft = 0;
-    right = v->spl_right;
-    v->spl_nright = 0;
-  
-    datum_alpha = (IP4R *) DatumGetPointer(((GISTENTRY *) VARDATA(entryvec))[seed_1].key);
-    datum_l = (IP4R *) palloc(sizeof(IP4R));
-    *datum_l = *datum_alpha;
-    size_l = ip4r_metric(datum_l);
-    datum_beta = (IP4R *) DatumGetPointer(((GISTENTRY *) VARDATA(entryvec))[seed_2].key);
-    datum_r = (IP4R *) palloc(sizeof(IP4R));
-    *datum_r = *datum_beta;
-    size_r = ip4r_metric(datum_r);
-
-    /*
-     * Now split up the regions between the two seeds.	An important
-     * property of this split algorithm is that the split vector v has the
-     * indices of items to be split in order in its left and right
-     * vectors.  We exploit this property by doing a merge in the code
-     * that actually splits the page.
-     *
-     * For efficiency, we also place the new index tuple in this loop. This
-     * is handled at the very end, when we have placed all the existing
-     * tuples and i == maxoff + 1.
-     */
-  
-    maxoff = OffsetNumberNext(maxoff);
-    for (i = FirstOffsetNumber; i <= maxoff; i = OffsetNumberNext(i))
-    {
-	/*
-	 * If we've already decided where to place this item, just put it
-	 * on the right list.  Otherwise, we need to figure out which page
-	 * needs the least enlargement in order to store the item.
-	 */
-	
-	if (i == seed_1)
-	{
-	    *left++ = i;
-	    v->spl_nleft++;
-	    continue;
-	}
-	else if (i == seed_2)
-	{
-	    *right++ = i;
-	    v->spl_nright++;
-	    continue;
-	}
-      
-	/* okay, which page needs least enlargement? */
-	datum_alpha = (IP4R *) DatumGetPointer(((GISTENTRY *) VARDATA(entryvec))[i].key);
-	size_alpha = ip4r_metric(ip4r_union_internal(datum_l, datum_alpha, &union_dl));
-	size_beta = ip4r_metric(ip4r_union_internal(datum_r, datum_alpha, &union_dr));
-	
-	/* pick which page to add it to */
-	if (size_alpha - size_l < size_beta - size_r)
-	{
-	    *datum_l = union_dl;
-	    size_l = size_alpha;
-	    *left++ = i;
-	    v->spl_nleft++;
-	}
-	else
-	{
-	    *datum_r = union_dr;
-	    size_r = size_beta;
-	    *right++ = i;
-	    v->spl_nright++;
-	}
-    }
-    *left = *right = FirstOffsetNumber; /* sentinel value, see dosplit() */
-    
-    v->spl_ldatum = PointerGetDatum(datum_l);
-    v->spl_rdatum = PointerGetDatum(datum_r);
-    
-    PG_RETURN_POINTER(v);
-}
-
-#endif
 
 /*
 ** Equality methods

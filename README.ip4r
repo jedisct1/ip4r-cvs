@@ -1,0 +1,285 @@
+
+IP4R  - IPv4 and IPv4 range index type for PostgreSQL
+=====================================================
+
+RATIONALE
+=========
+
+While PostgreSQL already has builtin types 'inet' and 'cidr', the
+authors of this module found that they had a number of requirements
+that were not addressed by the builtin type.
+
+Firstly and most importantly, the builtin types have no support for
+index lookups of the form (column >>= parameter), i.e. where you have
+a table of IP address ranges and wish to find which ones include a
+given IP address.  This requires an rtree or gist index to do
+efficiently, and also requires a way to represent IP address ranges
+that do not fall precisely on CIDR boundaries.
+
+Secondly, the builtin inet/cidr are somewhat overloaded with
+semantics, with inet combining two distinct concepts (a netblock, and
+a specific IP within that netblock). Furthermore, they are variable
+length types (to support ipv6) with non-trivial overheads, and the
+authors (whose applications mainly deal in large volumes of single
+IPv4 addresses) wanted a more lightweight representation.
+
+IP4R therefore supports two distinct data types (so far):
+
+  ip4   - a single IPv4 address
+  ip4r  - an arbitrary range of IPv4 addresses
+
+INSTALLATION
+============
+
+On version 8.0 or later of PostgreSQL, ip4r can be installed via the
+pgxs mechanism. Unpack the distribution and do:
+
+make USE_PGXS=1
+make USE_PGXS=1 install
+
+(as with PostgreSQL itself, this requires GNU Make. The second command
+will usually need to be run as root.)
+
+On versions prior to 8.0, first unpack the PostgreSQL distribution
+itself, and run ./configure with the same parameters you used when
+installing PostgreSQL originally. If you installed from a binary
+package, you will have to discover what options the packager used.
+Then create a subdirectory contrib/ip4r and copy the contents of
+the ip4r distribution there, and run make install.
+
+Installing via either of the above methods creates the ip4r.so module,
+and installs an SQL script ip4r.sql in the usual place for contrib
+modules ($prefix/share/contrib by default,
+/usr/local/share/postgresql/contrib on FreeBSD, etc.). In order to use
+the types in a given database, the ip4r.sql script must be run in that
+database, while connected as a database superuser.  For example:
+
+psql -U pgsql -f /usr/local/share/postgresql/contrib/ip4r.sql mydatabase
+
+(on systems other than FreeBSD, the username is usually "postgres"
+rather than "pgsql")
+
+This installs the type and its support functions in the catalog of the
+specified database. If you install it in template1, then newly-created
+databases will have the type pre-installed.
+
+The type, functions, etc. are by default installed in the "public"
+schema.  This can be changed by editing the ip4r.sql file.
+
+USAGE
+=====
+
+Type "ip4"
+----------
+
+ip4 accepts input in the form 'nnn.nnn.nnn.nnn' in decimal base only
+(no hex, octal, etc.).  An ip4 value is a single IP address, and is
+stored as a 32-bit unsigned integer.
+
+ip4 supports the following type conversions:
+
+  Source type   | Dest type |  Form
+----------------|-----------|----------------------------------------------
+  ip4           |  text     |  text(ip4)  or  ip4::text  (explicit)
+  text          |  ip4      |  ip4(text)  or  text::ip4  (explicit)
+  ip4           |  cidr     |  cidr(ip4)  or  ip4::cidr  (assignment)
+  inet          |  ip4      |  ip4(inet)  or  inet::ip4  (assignment)
+  ip4           |  bigint   |  to_bigint(ip4)  or  ip4::bigint  (explicit)
+  bigint        |  ip4      |  ip(bigint)      or  bigint::ip4  (explicit)
+  ip4           |  float8   |  to_double(ip4)  or  ip4::float8  (explicit)
+  float8        |  ip4      |  ip(float8)      or  float8::ip4  (explicit)
+  ip4           |  ip4r     |  ip4r(ip4)  or  ip4::ip4r  (implicit)
+
+The conversions from bigint and float8 accept values which are exact
+integers in the range 0 .. 2^32-1, which are converted to IPs in the
+range 0.0.0.0 - 255.255.255.255 in the obvious way. This is useful for
+conversions from applications which store IPs in numeric form, as is
+often done for performance in certain other databases.
+
+The conversion to cidr always results in a /32. The conversion from
+inet ignores any prefix length and just takes the specific IP address.
+
+An ip4 value implicitly converts to an ip4r range containing only the
+single IP address.
+
+ip4 supports the following operators with the conventional meanings:
+=, <>, <, >, <=, >=, and supports ORDER BY and btree indexes in the
+obvious fashion.
+
+
+Type "ip4r"
+-----------
+
+An ip4r value denotes a single range of one or more IP addresses,
+for example '192.0.2.100-192.0.2.200'. Arbitrary ranges are allowed,
+though input can also be in the form of CIDR netblocks, e.g.
+'192.0.2.0/24' is equivalent to '192.0.2.0-192.0.2.255'. A single
+value such as '192.0.2.25' represents a range containing only that
+value.
+
+Values are displayed in CIDR form if they represent a CIDR range,
+otherwise in range form.
+
+Currently, abbreviated CIDR forms are not accepted at all, i.e. all
+four octets must be supplied.
+
+An ip4r value can be constructed from two IPs explicitly using the
+function ip4r(ip4,ip4). The ends of the range can be specified in
+either order.
+
+ip4r supports the following type conversions:
+
+  Source type   | Dest type |  Form
+----------------|-----------|----------------------------------------------
+  ip4           |  ip4r     |  ip4r(ip4)  or  ip4::ip4r  (implicit)
+  ip4r          |  text     |  text(ip4r) or  ip4r::text (explicit)
+  text          |  ip4r     |  ip4r(text) or  text::ip4r (explicit)
+  ip4r          |  cidr     |  cidr(ip4r) or  ip4r::cidr (explicit)
+  cidr          |  ip4r     |  ip4r(cidr) or  cidr::ip4r (assignment)
+
+The conversion cidr(ip4r) returns NULL if the ip4r value does not
+represent a valid CIDR range.
+
+ip4r supports the following functions:
+
+  is_cidr(ip4r) returns boolean
+  |  returns TRUE if the ip4r value is a valid CIDR range
+
+  lower(ip4r) returns ip4
+  |  returns the lower end of the ip4r range, as an ip4 value
+
+  upper(ip4r) returns ip4
+  |  returns the upper end of the ip4r range, as an ip4 value
+
+  ip4r_size(ip4r) returns double precision
+  |  returns the number of IP addresses in the range
+
+An ip4r value can also be subscripted with [0] and [1] with the
+same effect as lower() and upper(), though this isn't encouraged
+(it won't be supported for future ip6 range types).
+
+ip4r supports the following operators:
+
+  Operator        | Description
+------------------|--------------------------------------------------------
+  a = b           | exact equality
+  a <> b          | exact inequality
+  a < b           | note [1]
+  a <= b          | note [1]
+  a > b           | note [1]
+  a >= b          | note [1]
+  a >>= b         | a contains b or is equal to b
+  a >> b          | a strictly contains b
+  a <<= b         | a is contained in b or is equal to b
+  a << b          | a is strictly contained in b
+  a && b          | a and b overlap
+  a <<< b         | strictly less than, note [2]
+  a &<< b         | note [2]
+  a >>> b         | strictly greater than, note [2]
+  a &>> b         | note [2]
+
+For historical reasons @ is equivalent to >>=, and ~ is equivalent
+to <<=, but use of these is not recommended in new code.
+
+[1]: the operators <, <=, >, >= implement an ordering for the purposes of
+btree indexes, DISTINCT and ORDER BY; the ordering is not necessarily
+useful for applications. The ordering used is a lexicographic ordering
+of (lower,upper).
+
+[2]: the operators <<<, &<<, >>> and &>> exist to satisfy the requirements
+for an rtree index. (a <<< b) if all IPs contained in a are strictly less
+than all IPs contained in b, and similarly for (a >>> b). The semantics of
+&<< and &>>, unfortunately, are different between different releases of
+PostgreSQL due to changes in the rtree infrastructure, and so their use in
+applications is not recommended.
+
+For testing whether an ip4r range contains a specified single ip, use the
+>>= operator, i.e.  ip4r >>= ip4.  The implicit conversion from ip4 to ip4r
+handles this case.
+
+
+ip4r Indexes
+------------
+
+ip4r values can be indexed in several ways.
+
+A conventional btree index on ip4r values will work for the purposes of
+unique/primary key constraints, ordering, and equality lookups (i.e.
+WHERE column = value). Btree indexes are created in the usual way and
+are the default index type.
+
+However, ip4r's utility comes from its ability to use gist (or rtree)
+indexes to support the following lookup types:
+
+  WHERE column >>= value      (or >>)
+  WHERE column <<= value      (or <<)
+  WHERE column && value
+
+These lookups require a GiST index (or rtree, though with PostgreSQL
+8.1 or later, rtree should be considered deprecated). This can be
+created as follows:
+
+CREATE INDEX indexname ON tablename USING gist (column);
+
+It is also possible to create a functional ip4r index over a column of
+'cidr' type as follows:
+
+CREATE INDEX indexname ON tablename USING gist (ip4r(cidrcolumn));
+
+This can then be used for queries of the form:
+
+  WHERE ip4r(cidrcolumn) >>= value    (or >>, <<=, && etc)
+
+One advantage of this method is that the ip4r type can be dropped and
+recreated without losing data. This is useful for accelerating queries
+on an existing table designed without ip4r in mind.
+
+Another idiom sometimes seen for representation of ranges of IP
+addresses is for applications to create two integer columns, and do
+range queries of the form:
+
+  WHERE value BETWEEN column1 and column2
+
+This is an attempt to get some use out of a btree index, but it performs
+poorly in most cases. This can also be converted to use a functional ip4r
+index as follows:
+
+CREATE INDEX indexname ON tablename
+   USING gist (ip4r(column1::ip4,column2::ip4));
+
+and then doing queries of the form:
+
+  WHERE ip4r(column1::ip4,column2::ip4) >>= value
+
+A common requirement is to get the longest-prefix (most specific)
+match to an IP address from a table of ranges or CIDR prefixes.
+This can usually be best achieved using ORDER BY ip4r_size(column),
+for example:
+
+SELECT * FROM tablename
+ WHERE column >>= value
+ ORDER BY ip4r_size(column)
+ LIMIT 1
+
+When looking up multiple IPs, one can do queries of the following
+form:
+
+SELECT DISTINCT ON (ips.ip) ips.ip, ranges.range
+  FROM ips, ranges
+ WHERE ranges.range >>= ips.ip
+ ORDER BY ips.ip, ip4r_size(ranges.range)
+
+
+
+AUTHORS
+=======
+
+this code by andrew@supernews.net Oct 2004 - Dec 2005
+derived from 'ipr' by Steve Atkins <steve@blighty.com> August 2003
+derived from the 'seg' type distributed with PostgreSQL.
+
+Distributed under the same terms as PostgreSQL itself.
+
+Currently maintained at:
+  http://pgfoundry.org/projects/ip4r/
+
