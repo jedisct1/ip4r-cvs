@@ -46,11 +46,13 @@
 #include "postgres.h"
 
 #include "access/gist.h"
+#include "access/skey.h"
 #include "utils/elog.h"
 #include "utils/palloc.h"
 #include "utils/builtins.h"
 #include "utils/inet.h"
 #include <sys/socket.h>
+#include <math.h>
 
 /* IP4 = uint32, stored in host-order. fixed-length and pass by value. */
 typedef uint32 IP4;
