@@ -1,0 +1,9 @@
+
+TODO
+====
+
+Add ip6 / ip6r with the same semantics for IPv6-only addresses.
+
+Add ip / ipr  to hold either IPv4/IPv6 addresses.
+ Issue: how to handle comparisons between ip4 and ip4?
+
