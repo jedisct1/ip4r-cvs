@@ -1,11 +1,11 @@
-/* $Id: ip4r.c,v 1.3 2005-12-03 23:48:57 andrewsn Exp $ */
+/* $Id: ip4r.c,v 1.4 2005-12-04 15:23:59 andrewsn Exp $ */
 /*
   New type 'ip4' used to represent a single IPv4 address efficiently
 
   New type 'ip4r' used to represent a range of IPv4 addresses, along
   with support for GiST and rtree indexing of the type.
 
-  V0.1: updates for 8.1. add some documentation.
+  V0.1: updates for 8.1. add some documentation and new functions.
   WARNING: semantics of &<< and &>> changed to track changes in rtree.
 
   V0.08: SQL changes only; functions returning "internal" must take
@@ -51,6 +51,8 @@
 
 #include "access/gist.h"
 #include "access/skey.h"
+#include "access/hash.h"
+#include "libpq/pqformat.h"
 #include "utils/elog.h"
 #include "utils/palloc.h"
 #include "utils/builtins.h"
@@ -118,6 +120,25 @@ unsigned masklen(uint32 lo, uint32 hi)
     }
 }
 
+static inline
+bool ip4_valid_netmask(uint32 mask)
+{
+    uint32 d = ~mask + 1;
+    /* at this point, d can be:
+     *  0 if mask was 0x00000000 (valid)
+     *  1 << (32-masklen)   (valid)
+     *  some other value  (invalid)
+     */
+    int fbit = ffs(d);
+    switch (fbit)
+    {
+	case 0:
+	    return true;
+	default:
+	    return ( ((uint32)(1U) << (fbit-1)) == d );
+    }
+}
+
 
 /* extract an IP from text. Don't try and use inet_addr/inet_aton, because
  * they often support too many bogus historical formats (octal or hex,
@@ -173,7 +194,7 @@ bool ip4r_from_inet(IP4 addr, unsigned masklen, IP4R *ipr)
 
 /* extract an IP range from text.
  */
-static inline
+static
 bool ip4r_from_str(char *str, IP4R *ipr)
 {
     unsigned a,b,c,d;
@@ -378,6 +399,9 @@ typedef bytea GistEntryVector;
 
 Datum ip4_in(PG_FUNCTION_ARGS);
 Datum ip4_out(PG_FUNCTION_ARGS);
+Datum ip4_recv(PG_FUNCTION_ARGS);
+Datum ip4_send(PG_FUNCTION_ARGS);
+Datum ip4hash(PG_FUNCTION_ARGS);
 Datum ip4_cast_to_text(PG_FUNCTION_ARGS);
 Datum ip4_cast_from_text(PG_FUNCTION_ARGS);
 Datum ip4_cast_from_inet(PG_FUNCTION_ARGS);
@@ -388,15 +412,32 @@ Datum ip4_cast_to_double(PG_FUNCTION_ARGS);
 Datum ip4_cast_from_double(PG_FUNCTION_ARGS);
 Datum ip4r_in(PG_FUNCTION_ARGS);
 Datum ip4r_out(PG_FUNCTION_ARGS);
+Datum ip4r_recv(PG_FUNCTION_ARGS);
+Datum ip4r_send(PG_FUNCTION_ARGS);
+Datum ip4rhash(PG_FUNCTION_ARGS);
 Datum ip4r_cast_to_text(PG_FUNCTION_ARGS);
 Datum ip4r_cast_from_text(PG_FUNCTION_ARGS);
 Datum ip4r_cast_from_cidr(PG_FUNCTION_ARGS);
 Datum ip4r_cast_to_cidr(PG_FUNCTION_ARGS);
 Datum ip4r_cast_from_ip4(PG_FUNCTION_ARGS);
 Datum ip4r_from_ip4s(PG_FUNCTION_ARGS);
+Datum ip4r_net_prefix(PG_FUNCTION_ARGS);
+Datum ip4r_net_mask(PG_FUNCTION_ARGS);
 Datum ip4r_lower(PG_FUNCTION_ARGS);
 Datum ip4r_upper(PG_FUNCTION_ARGS);
 Datum ip4r_is_cidr(PG_FUNCTION_ARGS);
+Datum ip4_netmask(PG_FUNCTION_ARGS);
+Datum ip4_net_lower(PG_FUNCTION_ARGS);
+Datum ip4_net_upper(PG_FUNCTION_ARGS);
+Datum ip4_plus_int(PG_FUNCTION_ARGS);
+Datum ip4_plus_bigint(PG_FUNCTION_ARGS);
+Datum ip4_minus_int(PG_FUNCTION_ARGS);
+Datum ip4_minus_bigint(PG_FUNCTION_ARGS);
+Datum ip4_minus_ip4(PG_FUNCTION_ARGS);
+Datum ip4_and(PG_FUNCTION_ARGS);
+Datum ip4_or(PG_FUNCTION_ARGS);
+Datum ip4_xor(PG_FUNCTION_ARGS);
+Datum ip4_not(PG_FUNCTION_ARGS);
 Datum ip4_lt(PG_FUNCTION_ARGS);
 Datum ip4_le(PG_FUNCTION_ARGS);
 Datum ip4_gt(PG_FUNCTION_ARGS);
@@ -431,7 +472,7 @@ Datum ip4r_right_overlap(PG_FUNCTION_ARGS);
 #define GIST_QUERY_DEBUG
 */
 
-static inline
+static
 text *
 make_text(char *str, int len)
 {
@@ -486,6 +527,35 @@ ip4_out(PG_FUNCTION_ARGS)
     char *out = palloc(32);
     ip4_to_str(ip, out, 32);
     PG_RETURN_CSTRING(out);
+}
+
+PG_FUNCTION_INFO_V1(ip4_recv);
+Datum
+ip4_recv(PG_FUNCTION_ARGS)
+{
+    StringInfo buf = (StringInfo) PG_GETARG_POINTER(0);
+    PG_RETURN_IP4((IP4) pq_getmsgint(buf, sizeof(IP4)));
+}
+
+PG_FUNCTION_INFO_V1(ip4_send);
+Datum
+ip4_send(PG_FUNCTION_ARGS)
+{
+    IP4 arg1 = PG_GETARG_IP4(0);
+    StringInfoData buf;
+
+    pq_begintypsend(&buf);
+    pq_sendint(&buf, arg1, sizeof(IP4));
+    PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
+}
+
+PG_FUNCTION_INFO_V1(ip4hash);
+Datum
+ip4hash(PG_FUNCTION_ARGS)
+{
+    IP4 arg1 = PG_GETARG_IP4(0);
+
+    return hash_any((unsigned char *)&arg1, sizeof(IP4));
 }
 
 PG_FUNCTION_INFO_V1(ip4_cast_to_text);
@@ -608,6 +678,182 @@ ip4_cast_from_double(PG_FUNCTION_ARGS)
     PG_RETURN_IP4((unsigned long) ival);
 }
 
+PG_FUNCTION_INFO_V1(ip4_netmask);
+Datum
+ip4_netmask(PG_FUNCTION_ARGS)
+{
+    int pfxlen = PG_GETARG_INT32(0);
+
+    if (pfxlen < 0 || pfxlen > 32)
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+		 errmsg("prefix length out of range")));
+    }
+
+    PG_RETURN_IP4( netmask(pfxlen) );
+}
+
+PG_FUNCTION_INFO_V1(ip4_net_lower);
+Datum
+ip4_net_lower(PG_FUNCTION_ARGS)
+{
+    IP4 ip = PG_GETARG_IP4(0);
+    int pfxlen = PG_GETARG_INT32(1);
+
+    if (pfxlen < 0 || pfxlen > 32)
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+		 errmsg("prefix length out of range")));
+    }
+
+    PG_RETURN_IP4( ip & netmask(pfxlen) );
+}
+
+PG_FUNCTION_INFO_V1(ip4_net_upper);
+Datum
+ip4_net_upper(PG_FUNCTION_ARGS)
+{
+    IP4 ip = PG_GETARG_IP4(0);
+    int pfxlen = PG_GETARG_INT32(1);
+
+    if (pfxlen < 0 || pfxlen > 32)
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+		 errmsg("prefix length out of range")));
+    }
+
+    PG_RETURN_IP4( ip | hostmask(pfxlen) );
+}
+
+PG_FUNCTION_INFO_V1(ip4_plus_int);
+Datum
+ip4_plus_int(PG_FUNCTION_ARGS)
+{
+    IP4 ip = PG_GETARG_IP4(0);
+    int addend = PG_GETARG_INT32(1);
+    IP4 result = ip + (IP4) addend;
+
+    if ((addend < 0) != (result < ip))
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+		 errmsg("ip address out of range")));
+    }
+
+    PG_RETURN_IP4(result);
+}
+
+PG_FUNCTION_INFO_V1(ip4_plus_bigint);
+Datum
+ip4_plus_bigint(PG_FUNCTION_ARGS)
+{
+    IP4 ip = PG_GETARG_IP4(0);
+    int64 addend = PG_GETARG_INT64(1);
+    int64 result = (int64) ip + addend;
+
+    if (((addend < 0) != (result < ip))
+	|| result != (int64)(IP4)result)
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+		 errmsg("ip address out of range")));
+    }
+
+    PG_RETURN_IP4( (IP4)(result) );
+}
+
+PG_FUNCTION_INFO_V1(ip4_minus_int);
+Datum
+ip4_minus_int(PG_FUNCTION_ARGS)
+{
+    IP4 ip = PG_GETARG_IP4(0);
+    int subtrahend = PG_GETARG_INT32(1);
+    IP4 result = ip - (IP4) subtrahend;
+
+    if ((subtrahend > 0) != (result < ip))
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+		 errmsg("ip address out of range")));
+    }
+
+    PG_RETURN_IP4(result);
+}
+
+PG_FUNCTION_INFO_V1(ip4_minus_bigint);
+Datum
+ip4_minus_bigint(PG_FUNCTION_ARGS)
+{
+    IP4 ip = PG_GETARG_IP4(0);
+    int64 subtrahend = PG_GETARG_INT64(1);
+    int64 result = (int64) ip - subtrahend;
+
+    if (((subtrahend > 0) != (result < ip))
+	|| result != (int64)(IP4)result)
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+		 errmsg("ip address out of range")));
+    }
+
+    PG_RETURN_IP4( (IP4)(result) );
+}
+
+PG_FUNCTION_INFO_V1(ip4_minus_ip4);
+Datum
+ip4_minus_ip4(PG_FUNCTION_ARGS)
+{
+    IP4 minuend = PG_GETARG_IP4(0);
+    IP4 subtrahend = PG_GETARG_IP4(1);
+    int64 result = (int64) minuend - (int64) subtrahend;
+
+    PG_RETURN_INT64(result);
+}
+
+PG_FUNCTION_INFO_V1(ip4_and);
+Datum
+ip4_and(PG_FUNCTION_ARGS)
+{
+    IP4 a = PG_GETARG_IP4(0);
+    IP4 b = PG_GETARG_IP4(1);
+
+    PG_RETURN_IP4(a & b);
+}
+
+PG_FUNCTION_INFO_V1(ip4_or);
+Datum
+ip4_or(PG_FUNCTION_ARGS)
+{
+    IP4 a = PG_GETARG_IP4(0);
+    IP4 b = PG_GETARG_IP4(1);
+
+    PG_RETURN_IP4(a | b);
+}
+
+PG_FUNCTION_INFO_V1(ip4_xor);
+Datum
+ip4_xor(PG_FUNCTION_ARGS)
+{
+    IP4 a = PG_GETARG_IP4(0);
+    IP4 b = PG_GETARG_IP4(1);
+
+    PG_RETURN_IP4(a ^ b);
+}
+
+PG_FUNCTION_INFO_V1(ip4_not);
+Datum
+ip4_not(PG_FUNCTION_ARGS)
+{
+    IP4 a = PG_GETARG_IP4(0);
+
+    PG_RETURN_IP4(~a);
+}
+
+
+/*---- ip4r ----*/
 
 PG_FUNCTION_INFO_V1(ip4r_in);
 Datum
@@ -636,6 +882,41 @@ ip4r_out(PG_FUNCTION_ARGS)
     char *out = palloc(32);
     ip4r_to_str(ipr, out, 32);
     PG_RETURN_CSTRING(out);
+}
+
+PG_FUNCTION_INFO_V1(ip4r_recv);
+Datum
+ip4r_recv(PG_FUNCTION_ARGS)
+{
+    StringInfo buf = (StringInfo) PG_GETARG_POINTER(0);
+    IP4R *ipr = palloc(sizeof(IP4R));
+
+    ipr->lower = (IP4) pq_getmsgint(buf, sizeof(IP4));
+    ipr->upper = (IP4) pq_getmsgint(buf, sizeof(IP4));
+
+    PG_RETURN_IP4R_P(ipr);
+}
+
+PG_FUNCTION_INFO_V1(ip4r_send);
+Datum
+ip4r_send(PG_FUNCTION_ARGS)
+{
+    IP4R *ipr = PG_GETARG_IP4R_P(0);
+    StringInfoData buf;
+
+    pq_begintypsend(&buf);
+    pq_sendint(&buf, ipr->lower, sizeof(IP4));
+    pq_sendint(&buf, ipr->upper, sizeof(IP4));
+    PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
+}
+
+PG_FUNCTION_INFO_V1(ip4rhash);
+Datum
+ip4rhash(PG_FUNCTION_ARGS)
+{
+    IP4R *arg1 = PG_GETARG_IP4R_P(0);
+
+    return hash_any((unsigned char *)arg1, sizeof(IP4R));
 }
 
 PG_FUNCTION_INFO_V1(ip4r_cast_to_text);
@@ -764,6 +1045,56 @@ ip4r_from_ip4s(PG_FUNCTION_ARGS)
 	res->lower = b, res->upper = a;
     PG_RETURN_IP4R_P( res );
 }
+
+PG_FUNCTION_INFO_V1(ip4r_net_prefix);
+Datum
+ip4r_net_prefix(PG_FUNCTION_ARGS)
+{
+    IP4 ip = PG_GETARG_IP4(0);
+    int pfxlen = PG_GETARG_INT32(1);
+
+    if (pfxlen < 0 || pfxlen > 32)
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+		 errmsg("prefix length out of range")));
+    }
+
+    {
+	IP4 mask = netmask(pfxlen);
+	IP4R *res = palloc(sizeof(IP4R));
+    
+	res->lower = ip & mask;
+	res->upper = ip | ~mask;
+
+	PG_RETURN_IP4R_P(res);
+    }
+}
+
+PG_FUNCTION_INFO_V1(ip4r_net_mask);
+Datum
+ip4r_net_mask(PG_FUNCTION_ARGS)
+{
+    IP4 ip = PG_GETARG_IP4(0);
+    IP4 mask = PG_GETARG_IP4(1);
+
+    if (!ip4_valid_netmask(mask))
+    {
+	ereport(ERROR,
+		(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+		 errmsg("invalid netmask")));
+    }
+
+    {
+	IP4R *res = palloc(sizeof(IP4R));
+    
+	res->lower = ip & mask;
+	res->upper = ip | ~mask;
+
+	PG_RETURN_IP4R_P(res);
+    }
+}
+
 
 PG_FUNCTION_INFO_V1(ip4r_lower);
 Datum

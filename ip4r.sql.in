@@ -5,6 +5,8 @@
 SET search_path = public;
 
 BEGIN;
+-- type creation is needlessly chatty
+SET LOCAL client_min_messages = warning;
 
 CREATE OR REPLACE FUNCTION ip4_in(cstring)
 RETURNS ip4
@@ -16,10 +18,22 @@ RETURNS cstring
 AS 'MODULE_PATHNAME'
 LANGUAGE 'C' IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION ip4_recv(internal)
+RETURNS ip4
+AS 'MODULE_PATHNAME'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_send(ip4)
+RETURNS bytea
+AS 'MODULE_PATHNAME'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
 CREATE TYPE ip4 (
 	INTERNALLENGTH = 4,
 	INPUT = ip4_in,
 	OUTPUT = ip4_out,
+	RECEIVE = ip4_recv,
+	SEND = ip4_send,
 	ALIGNMENT = int4,
 	PASSEDBYVALUE
 );
@@ -69,6 +83,11 @@ RETURNS ip4
 AS 'MODULE_PATHNAME', 'ip4_cast_from_double'
 LANGUAGE 'C' IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION ip4hash(ip4)
+RETURNS integer
+AS 'MODULE_PATHNAME', 'ip4hash'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
 CREATE CAST (text as ip4) WITH FUNCTION ip4(text);
 CREATE CAST (inet as ip4) WITH FUNCTION ip4(inet) AS ASSIGNMENT;
 CREATE CAST (ip4 as cidr) WITH FUNCTION cidr(ip4) AS ASSIGNMENT;
@@ -83,6 +102,8 @@ CREATE CAST (double precision as ip4) WITH FUNCTION ip4(double precision);
 --
 
 BEGIN;
+-- type creation is needlessly chatty
+SET LOCAL client_min_messages = warning;
 
 CREATE OR REPLACE FUNCTION ip4r_in(cstring)
 RETURNS ip4r
@@ -94,10 +115,22 @@ RETURNS cstring
 AS 'MODULE_PATHNAME'
 LANGUAGE 'C' IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION ip4r_recv(internal)
+RETURNS ip4r
+AS 'MODULE_PATHNAME'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4r_send(ip4r)
+RETURNS bytea
+AS 'MODULE_PATHNAME'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
 CREATE TYPE ip4r (
 	INTERNALLENGTH = 8,
 	INPUT = ip4r_in,
 	OUTPUT = ip4r_out,
+	RECEIVE = ip4r_recv,
+	SEND = ip4r_send,
 	ALIGNMENT = int4,
         ELEMENT = ip4
 );
@@ -137,6 +170,21 @@ RETURNS ip4r
 AS 'MODULE_PATHNAME', 'ip4r_from_ip4s'
 LANGUAGE 'C' IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION ip4r_net_prefix(ip4,integer)
+RETURNS ip4r
+AS 'MODULE_PATHNAME', 'ip4r_net_prefix'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4r_net_mask(ip4,ip4)
+RETURNS ip4r
+AS 'MODULE_PATHNAME', 'ip4r_net_mask'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4rhash(ip4r)
+RETURNS integer
+AS 'MODULE_PATHNAME', 'ip4rhash'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
 CREATE CAST (text as ip4r) WITH FUNCTION ip4r(text);
 CREATE CAST (cidr as ip4r) WITH FUNCTION ip4r(cidr) AS ASSIGNMENT;
 CREATE CAST (ip4r as cidr) WITH FUNCTION cidr(ip4r);
@@ -156,6 +204,68 @@ LANGUAGE 'C' IMMUTABLE STRICT;
 CREATE OR REPLACE FUNCTION upper(ip4r)
 RETURNS ip4
 AS 'MODULE_PATHNAME', 'ip4r_upper'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+-- miscellaneous functions for ip4
+
+CREATE OR REPLACE FUNCTION ip4_netmask(integer)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_netmask'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_net_lower(ip4,integer)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_net_lower'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_net_upper(ip4,integer)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_net_upper'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_plus_int(ip4,integer)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_plus_int'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_plus_bigint(ip4,bigint)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_plus_bigint'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_minus_int(ip4,integer)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_minus_int'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_minus_bigint(ip4,bigint)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_minus_bigint'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_minus_ip4(ip4,ip4)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_minus_ip4'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_and(ip4,ip4)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_and'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_or(ip4,ip4)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_or'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_xor(ip4,ip4)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_xor'
+LANGUAGE 'C' IMMUTABLE STRICT;
+
+CREATE OR REPLACE FUNCTION ip4_not(ip4)
+RETURNS ip4
+AS 'MODULE_PATHNAME', 'ip4_not'
 LANGUAGE 'C' IMMUTABLE STRICT;
 
 -- Comparison methods for ip4
@@ -361,7 +471,8 @@ CREATE OPERATOR = (
 	RESTRICT = eqsel,
 	JOIN = eqjoinsel,
 	SORT1 = '<',
-	SORT2 = '<'
+	SORT2 = '<',
+	HASHES
 );
 
 CREATE OPERATOR <> (
@@ -372,6 +483,60 @@ CREATE OPERATOR <> (
 	NEGATOR = '=',
 	RESTRICT = neqsel,
 	JOIN = neqjoinsel
+);
+
+
+CREATE OPERATOR + (
+	LEFTARG = ip4,
+	RIGHTARG = integer,
+	PROCEDURE = ip4_plus_int
+);
+
+CREATE OPERATOR + (
+	LEFTARG = ip4,
+	RIGHTARG = bigint,
+	PROCEDURE = ip4_plus_bigint
+);
+
+CREATE OPERATOR - (
+	LEFTARG = ip4,
+	RIGHTARG = integer,
+	PROCEDURE = ip4_minus_int
+);
+
+CREATE OPERATOR - (
+	LEFTARG = ip4,
+	RIGHTARG = bigint,
+	PROCEDURE = ip4_minus_bigint
+);
+
+CREATE OPERATOR - (
+	LEFTARG = ip4,
+	RIGHTARG = ip4,
+	PROCEDURE = ip4_minus_ip4
+);
+
+CREATE OPERATOR & (
+	LEFTARG = ip4,
+	RIGHTARG = ip4,
+	PROCEDURE = ip4_and
+);
+
+CREATE OPERATOR | (
+	LEFTARG = ip4,
+	RIGHTARG = ip4,
+	PROCEDURE = ip4_or
+);
+
+CREATE OPERATOR # (
+	LEFTARG = ip4,
+	RIGHTARG = ip4,
+	PROCEDURE = ip4_xor
+);
+
+CREATE OPERATOR ~ (
+	RIGHTARG = ip4,
+	PROCEDURE = ip4_not
 );
 
 
@@ -473,7 +638,8 @@ CREATE OPERATOR = (
 	RESTRICT = eqsel,
 	JOIN = eqjoinsel,
 	SORT1 = '<',
-	SORT2 = '<'
+	SORT2 = '<',
+	HASHES
 );
 
 CREATE OPERATOR <> (
@@ -568,29 +734,6 @@ CREATE OPERATOR &>> (
 --);
 --
 
--- rtree support methods
-
--- union and inter actually take ip4r parameters, but we must
--- declare them as taking "internal" to maintain the security of
--- the internal type. (functions returning internal must take at
--- least one parameter of internal type). union could be declared
--- to return an ip4r, but inter can return a NULL pointer due to
--- some very dubious calling conventions in the backend.
-
-CREATE OR REPLACE FUNCTION rt_ip4r_union(internal,internal)
-RETURNS internal
-AS 'MODULE_PATHNAME'
-LANGUAGE 'C';
-
-CREATE OR REPLACE FUNCTION rt_ip4r_inter(internal,internal)
-RETURNS internal
-AS 'MODULE_PATHNAME'
-LANGUAGE 'C';
-
-CREATE OR REPLACE FUNCTION rt_ip4r_size(ip4r,internal)
-RETURNS internal
-AS 'MODULE_PATHNAME'
-LANGUAGE 'C';
 
 -- define the GiST support methods
 
@@ -651,20 +794,22 @@ AS
 	OPERATOR	5	> ,
 	FUNCTION	1	ip4r_cmp(ip4r, ip4r);
 
-CREATE OPERATOR CLASS rtree_ip4r_ops
-DEFAULT FOR TYPE ip4r USING rtree
+-- we don't really expect people to use hash indexes, but hash-join
+-- and hash-aggregate use this too.
+
+CREATE OPERATOR CLASS hash_ip4_ops
+DEFAULT FOR TYPE ip4 USING hash
 AS
-	OPERATOR	1	<<< ,
-	OPERATOR	2	&<< ,
-	OPERATOR	3	&& ,
-	OPERATOR	4	&>> ,
-	OPERATOR	5	>>> ,
-	OPERATOR	6	= ,
-	OPERATOR	7	>>= ,
-	OPERATOR	8	<<= ,
-	FUNCTION	1	rt_ip4r_union(internal, internal),
-	FUNCTION	2	rt_ip4r_inter(internal, internal),
-	FUNCTION	3	rt_ip4r_size(ip4r, internal);
+	OPERATOR	1	= ,
+	FUNCTION	1	ip4hash(ip4);
+
+CREATE OPERATOR CLASS hash_ip4r_ops
+DEFAULT FOR TYPE ip4r USING hash
+AS
+	OPERATOR	1	= ,
+	FUNCTION	1	ip4rhash(ip4r);
+
+-- gist
 
 CREATE OPERATOR CLASS gist_ip4r_ops
 DEFAULT FOR TYPE ip4r USING gist 
@@ -682,5 +827,60 @@ AS
 	FUNCTION	5	gip4r_penalty (internal, internal, internal),
 	FUNCTION	6	gip4r_picksplit (internal, internal),
 	FUNCTION	7	gip4r_same (ip4r, ip4r, internal);
+
+-- Rtree
+--
+-- rtree is gone as of 8.2, but we want to keep it here for the
+-- benefit of 7.x and 8.0 where it beats GiST in some cases.
+-- various gory hacks to suppress the error that otherwise occurs.
+-- Moved this to the end of the file so that even if it chokes, we
+-- still installed everything else.
+
+BEGIN;
+SELECT set_config('client_min_messages',
+ case when substring(version() from 'PostgreSQL ([0-9]+\\.[0-9]+)') ~ '^(7\\.[34]|8\\.[01])$'
+      then 'notice' else 'panic' end,
+ true);
+
+-- rtree support methods
+
+-- union and inter actually take ip4r parameters, but we must
+-- declare them as taking "internal" to maintain the security of
+-- the internal type. (functions returning internal must take at
+-- least one parameter of internal type). union could be declared
+-- to return an ip4r, but inter can return a NULL pointer due to
+-- some very dubious calling conventions in the backend.
+
+CREATE OR REPLACE FUNCTION rt_ip4r_union(internal,internal)
+RETURNS internal
+AS 'MODULE_PATHNAME'
+LANGUAGE 'C';
+
+CREATE OR REPLACE FUNCTION rt_ip4r_inter(internal,internal)
+RETURNS internal
+AS 'MODULE_PATHNAME'
+LANGUAGE 'C';
+
+CREATE OR REPLACE FUNCTION rt_ip4r_size(ip4r,internal)
+RETURNS internal
+AS 'MODULE_PATHNAME'
+LANGUAGE 'C';
+
+CREATE OPERATOR CLASS rtree_ip4r_ops
+DEFAULT FOR TYPE ip4r USING rtree
+AS
+	OPERATOR	1	<<< ,
+	OPERATOR	2	&<< ,
+	OPERATOR	3	&& ,
+	OPERATOR	4	&>> ,
+	OPERATOR	5	>>> ,
+	OPERATOR	6	= ,
+	OPERATOR	7	>>= ,
+	OPERATOR	8	<<= ,
+	FUNCTION	1	rt_ip4r_union(internal, internal),
+	FUNCTION	2	rt_ip4r_inter(internal, internal),
+	FUNCTION	3	rt_ip4r_size(ip4r, internal);
+
+COMMIT;
 
 -- end

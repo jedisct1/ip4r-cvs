@@ -28,6 +28,38 @@ IP4R therefore supports two distinct data types (so far):
   ip4   - a single IPv4 address
   ip4r  - an arbitrary range of IPv4 addresses
 
+Simple usage examples:
+
+CREATE TABLE ipranges (range ip4r primary key, description text not null);
+CREATE INDEX ipranges_range_idx ON ipranges USING gist (range);
+INSERT INTO ipranges VALUES ('10.0.0.0/8','rfc1918 block 1');
+INSERT INTO ipranges VALUES ('172.16.0.0/12','rfc1918 block 2');
+INSERT INTO ipranges VALUES ('192.168.0.0/16','rfc1918 block 3');
+INSERT INTO ipranges VALUES ('0.0.0.0/1','classical class A space');
+INSERT INTO ipranges VALUES ('10.0.1.10-10.0.1.20','my internal network');
+INSERT INTO ipranges VALUES ('127.0.0.1','localhost');
+
+CREATE TABLE access_log (id serial primary key, ip ip4 not null);
+CREATE INDEX access_log_ip_idx ON access_log (ip);
+INSERT INTO access_log(ip) VALUES ('10.0.1.15');
+INSERT INTO access_log(ip) VALUES ('24.1.2.3');
+INSERT INTO access_log(ip) VALUES ('192.168.10.20');
+INSERT INTO access_log(ip) VALUES ('127.0.0.1');
+
+-- find all accesses from 10.0.0.0/8
+SELECT * FROM access_log WHERE ip BETWEEN '10.0.0.0' AND '10.255.255.255';
+
+-- find all applicable descriptions for all entry in the access log
+-- returns multiple rows for each entry if there are overlapping ranges
+SELECT id,ip,range,description FROM access_log, ipranges WHERE ip <<= range;
+
+-- find only the most specific description for all IPs in the access log
+SELECT DISTINCT ON (ip) ip,range,description
+  FROM access_log, ipranges
+ WHERE ip <<= range
+ ORDER BY ip,ip4r_size(range);
+
+
 INSTALLATION
 ============
 
@@ -65,6 +97,7 @@ databases will have the type pre-installed.
 
 The type, functions, etc. are by default installed in the "public"
 schema.  This can be changed by editing the ip4r.sql file.
+
 
 USAGE
 =====
@@ -104,7 +137,53 @@ single IP address.
 
 ip4 supports the following operators with the conventional meanings:
 =, <>, <, >, <=, >=, and supports ORDER BY and btree indexes in the
-obvious fashion.
+obvious fashion. However, the planner does not understand how to
+transform a query of the form
+
+  WHERE ip4column <<= value
+
+into a btree range scan (it does this transformation for the builtin
+inet type using a function which is not extensible by plugins). As a
+workaround, use the following form instead:
+
+  WHERE ip4column BETWEEN lower(value) AND upper(value)
+
+which will use a btree range scan.
+
+ip4 supports the following additional operators and functions:
+
+ ip4_netmask(integer) returns ip4
+ | returns an ip4 value that represents a netmask for a prefix length
+
+ ip4_net_lower(ip4, integer) returns ip4
+ | returns the lowest address in the cidr block of the specified prefix
+ | length, containing the specified IP
+ | equivalent to: network(set_masklen(cidr(ip4),integer))
+
+ ip4_net_upper(ip4, integer) returns ip4
+ | returns the highest address in the cidr block of the specified prefix
+ | length, containing the specified IP
+ | equivalent to: broadcast(set_masklen(cidr(ip4),integer))
+
+  Operator        | Description
+------------------|--------------------------------------------------------
+ ip4 + integer    | add the given integer to the IP 
+ ip4 - integer    | subtract the given integer from the IP 
+ ip4 + bigint     | add the given integer to the IP 
+ ip4 - bigint     | subtract the given integer from the IP 
+ ip4 - ip4        | (returns bigint) difference between two IPs
+ ip4 & ip4        | bitwise-AND the two values
+ ip4 | ip4        | bitwise-OR the two values
+ ip4 # ip4        | bitwise-XOR the two values
+ ~ ip4            | bitwise-NOT the value
+
+Arithmetic on ip4 values does not wrap below 0.0.0.0 or above
+255.255.255.255 - attempting to go beyond these limits raises an
+error.
+
+More complex arithmetic on IP addresses can be performed by converting
+the IPs to bigint first; the above are only intended to cover the
+common cases without requiring casts.
 
 
 Type "ip4r"
@@ -126,6 +205,11 @@ four octets must be supplied.
 An ip4r value can be constructed from two IPs explicitly using the
 function ip4r(ip4,ip4). The ends of the range can be specified in
 either order.
+
+An ip4r value can be constructed from an IP and a prefix length
+using the function ip4r_net_prefix(ip4,integer), or from an IP
+and a netmask using the function ip4r_net_mask(ip4,ip4). In the
+latter case, non-contiguous netmasks will be rejected.
 
 ip4r supports the following type conversions:
 
