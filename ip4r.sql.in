@@ -837,10 +837,6 @@ AS
 -- still installed everything else.
 
 BEGIN;
-SELECT set_config('client_min_messages',
- case when substring(version() from 'PostgreSQL ([0-9]+\\.[0-9]+)') ~ '^(7\\.[34]|8\\.[01])$'
-      then 'notice' else 'panic' end,
- true);
 
 -- rtree support methods
 
@@ -865,6 +861,17 @@ CREATE OR REPLACE FUNCTION rt_ip4r_size(ip4r,internal)
 RETURNS internal
 AS 'MODULE_PATHNAME'
 LANGUAGE 'C';
+
+SELECT case s when 'panic' then 'ignore following ROLLBACK'
+              else 'creating rtree opclass'
+       end
+  FROM set_config('client_min_messages',
+                  case when substring(version()
+                                      from 'PostgreSQL ([0-9]+[.][0-9]+)')
+                              ~ '^(7[.][34]|8[.][01])$'
+                       then 'notice'
+                       else 'panic' end,
+                  true) as s;
 
 CREATE OPERATOR CLASS rtree_ip4r_ops
 DEFAULT FOR TYPE ip4r USING rtree

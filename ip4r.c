@@ -1,9 +1,11 @@
-/* $Id: ip4r.c,v 1.4 2005-12-04 15:23:59 andrewsn Exp $ */
+/* $Id: ip4r.c,v 1.5 2006-10-08 17:10:02 andrewsn Exp $ */
 /*
   New type 'ip4' used to represent a single IPv4 address efficiently
 
   New type 'ip4r' used to represent a range of IPv4 addresses, along
   with support for GiST and rtree indexing of the type.
+
+  V1.01: updates for 8.2
 
   V0.1: updates for 8.1. add some documentation and new functions.
   WARNING: semantics of &<< and &>> changed to track changes in rtree.
@@ -384,18 +386,87 @@ bool ip4r_extends_right_of_internal(IP4R *left, IP4R *right)
 #define PG_GETARG_IP4(n) PG_GETARG_UINT32(n)
 #define PG_RETURN_IP4(x) PG_RETURN_UINT32(x)
 
-#if IP4R_PGVER >= 8000000 && IP4R_PGVER < 9000000
+/* PG version dependencies */
+
+#if !defined(IP4R_PGVER) || IP4R_PGVER >= 9000000 || IP4R_PGVER < 7003000
+#error "Unknown or unsupported postgresql version"
+#endif
+
+/* PG_MODULE_MAGIC was introduced in 8.2. */
+
+#if IP4R_PGVER >= 8002000
+PG_MODULE_MAGIC;
+#endif
+
+/* The "inet" type representation lost its "type" field in 8.2 - it was
+ * always redundant
+ */
+
+#if IP4R_PGVER >= 8002000
+
+#define INET_INIT_CIDR(i)
+#define INET_IS_CIDR(i) (1)
+
+#else /* IP4R_PGVER < 8002000 */
+
+#define INET_INIT_CIDR(i) ((i)->type = 1)
+#define INET_IS_CIDR(i) ((i)->type)
+
+#endif
+
+/* The semantics of the rtree opclass operators changed in 8.1. Since we
+ * don't really consider our &<< and &>> operators as useful except for
+ * internal use with rtree, we make our operators change in semantics to
+ * match what rtree expects.
+ * This becomes academic for 8.2 on since rtree no longer exists, but we
+ * stick with the 8.1 semantics.
+ */
+
+#if IP4R_PGVER >= 8001000
+
+#define IP4R_LEFT_OVERLAP_OP(a,b) (! ip4r_extends_right_of_internal((a),(b)))
+#define IP4R_RIGHT_OVERLAP_OP(a,b) (! ip4r_extends_left_of_internal((a),(b)))
+
+#else
+
+#define IP4R_LEFT_OVERLAP_OP(a,b) (ip4r_extends_left_of_internal((a),(b)))
+#define IP4R_RIGHT_OVERLAP_OP(a,b) (ip4r_extends_right_of_internal((a),(b)))
+
+#endif
+
+/* The data structure name for the internal representation of "inet"
+ * was changed in 8.0 for no readily apparent reason.
+ */
+
+#if IP4R_PGVER >= 8000000
+
 #define INET_IPADDR ipaddr
+
+#else /* IP4R_PGVER < 8000000 */
+
+#define INET_IPADDR ip_addr
+
+#endif
+
+/* The interface to GiST was improved in 8.0, with a new structure for
+ * GiST entry vectors rather than passing them as bytea. Hide the change
+ * behind some macros.
+ */
+
+#if IP4R_PGVER >= 8000000
+
 #define GISTENTRYCOUNT(v) ((v)->n)
 #define GISTENTRYVEC(v) ((v)->vector)
-#elif IP4R_PGVER >= 7000000 && IP4R_PGVER < 8000000
-#define INET_IPADDR ip_addr
+
+#else /* IP4R_PGVER < 8000000 */
+
 typedef bytea GistEntryVector;
 #define GISTENTRYCOUNT(v) ( (VARSIZE((v)) - VARHDRSZ) / sizeof(GISTENTRY) )
 #define GISTENTRYVEC(v) ((GISTENTRY *) VARDATA(entryvec))
-#else
-#error "Unknown postgresql version"
+
 #endif
+
+/* end of version dependencies */
 
 Datum ip4_in(PG_FUNCTION_ARGS);
 Datum ip4_out(PG_FUNCTION_ARGS);
@@ -623,8 +694,8 @@ ip4_cast_to_cidr(PG_FUNCTION_ARGS)
     VARATT_SIZEP(res) = VARHDRSZ + offsetof(inet_struct, INET_IPADDR) + 4;
 
     in = ((inet_struct *)VARDATA(res));
+    INET_INIT_CIDR(in);
     in->bits = 32;
-    in->type = 1;  /* cidr, not inet */
     in->family = PGSQL_AF_INET;
     {
 	unsigned char *p = in->INET_IPADDR;
@@ -964,7 +1035,7 @@ ip4r_cast_from_cidr(PG_FUNCTION_ARGS)
     inet *inetptr = PG_GETARG_INET_P(0);
     inet_struct *in = ((inet_struct *)VARDATA(inetptr));
 
-    if (in->type && in->family == PGSQL_AF_INET)
+    if (INET_IS_CIDR(in) && in->family == PGSQL_AF_INET)
     {
         unsigned char *p = in->INET_IPADDR;
     	IP4 ip = (p[0] << 24)|(p[1] << 16)|(p[2] << 8)|p[3];
@@ -1000,8 +1071,8 @@ ip4r_cast_to_cidr(PG_FUNCTION_ARGS)
     VARATT_SIZEP(res) = VARHDRSZ + offsetof(inet_struct, INET_IPADDR) + 4;
 
     in = ((inet_struct *)VARDATA(res));
+    INET_INIT_CIDR(in);
     in->bits = bits;
-    in->type = 1;  /* cidr, not inet */
     in->family = PGSQL_AF_INET;
     {
 	unsigned char *p = in->INET_IPADDR;
@@ -1273,11 +1344,8 @@ PG_FUNCTION_INFO_V1(ip4r_left_overlap);
 Datum 
 ip4r_left_overlap(PG_FUNCTION_ARGS)
 {
-#if IP4R_PGVER < 8001000
-    PG_RETURN_BOOL( ip4r_extends_left_of_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
-#else
-    PG_RETURN_BOOL(! ip4r_extends_right_of_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
-#endif
+    PG_RETURN_BOOL( IP4R_LEFT_OVERLAP_OP(PG_GETARG_IP4R_P(0),
+                                         PG_GETARG_IP4R_P(1)) );
 }
 
 PG_FUNCTION_INFO_V1(ip4r_right_of);
@@ -1291,11 +1359,8 @@ PG_FUNCTION_INFO_V1(ip4r_right_overlap);
 Datum
 ip4r_right_overlap(PG_FUNCTION_ARGS)
 {
-#if IP4R_PGVER < 8001000
-    PG_RETURN_BOOL( ip4r_extends_right_of_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
-#else
-    PG_RETURN_BOOL(! ip4r_extends_left_of_internal(PG_GETARG_IP4R_P(0), PG_GETARG_IP4R_P(1)) );
-#endif
+    PG_RETURN_BOOL( IP4R_RIGHT_OVERLAP_OP(PG_GETARG_IP4R_P(0),
+                                          PG_GETARG_IP4R_P(1)) );
 }
 
 
