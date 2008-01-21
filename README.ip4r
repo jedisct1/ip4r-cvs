@@ -118,9 +118,9 @@ ip4 supports the following type conversions:
   ip4           |  cidr     |  cidr(ip4)  or  ip4::cidr  (assignment)
   inet          |  ip4      |  ip4(inet)  or  inet::ip4  (assignment)
   ip4           |  bigint   |  to_bigint(ip4)  or  ip4::bigint  (explicit)
-  bigint        |  ip4      |  ip(bigint)      or  bigint::ip4  (explicit)
+  bigint        |  ip4      |  ip4(bigint)     or  bigint::ip4  (explicit)
   ip4           |  float8   |  to_double(ip4)  or  ip4::float8  (explicit)
-  float8        |  ip4      |  ip(float8)      or  float8::ip4  (explicit)
+  float8        |  ip4      |  ip4(float8)     or  float8::ip4  (explicit)
   ip4           |  ip4r     |  ip4r(ip4)  or  ip4::ip4r  (implicit)
 
 The conversions from bigint and float8 accept values which are exact
