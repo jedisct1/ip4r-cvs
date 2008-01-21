@@ -1,9 +1,11 @@
-/* $Id: ip4r.c,v 1.5 2006-10-08 17:10:02 andrewsn Exp $ */
+/* $Id: ip4r.c,v 1.6 2008-01-21 02:23:09 andrewsn Exp $ */
 /*
   New type 'ip4' used to represent a single IPv4 address efficiently
 
   New type 'ip4r' used to represent a range of IPv4 addresses, along
   with support for GiST and rtree indexing of the type.
+
+  V1.02: updates for 8.3
 
   V1.01: updates for 8.2
 
@@ -392,6 +394,20 @@ bool ip4r_extends_right_of_internal(IP4R *left, IP4R *right)
 #error "Unknown or unsupported postgresql version"
 #endif
 
+/* 8.3 changes the varlena header (to support "short" varlenas without
+ * needing a full 32-bit length field) and changes the varlena macros
+ * to support this. Keep the new interface (which is cleaner than the
+ * old one anyway) and emulate it for older versions.
+ */
+
+#if IP4R_PGVER >= 8003000
+/* nothing */
+#else /* IP4R_PGVER < 8003000 */
+
+#define SET_VARSIZE(var_,val_) VARATT_SIZEP(var_) = (val_)
+
+#endif
+
 /* PG_MODULE_MAGIC was introduced in 8.2. */
 
 #if IP4R_PGVER >= 8002000
@@ -548,7 +564,7 @@ text *
 make_text(char *str, int len)
 {
     text *ret = (text *) palloc(len + VARHDRSZ);
-    VARATT_SIZEP(ret) = len + VARHDRSZ;
+    SET_VARSIZE(ret, len + VARHDRSZ);
     if (str)
 	memcpy(VARDATA(ret), str, len);
     else
@@ -560,8 +576,8 @@ static inline
 void
 set_text_len(text *txt, int len)
 {
-    if ((len + VARHDRSZ) < VARATT_SIZEP(txt))
-	VARATT_SIZEP(txt) = len + VARHDRSZ;
+    if ((len + VARHDRSZ) < VARSIZE(txt))
+      SET_VARSIZE(txt, len + VARHDRSZ);
 }
 
 static inline
@@ -691,7 +707,7 @@ ip4_cast_to_cidr(PG_FUNCTION_ARGS)
     inet *res = palloc0(VARHDRSZ + sizeof(inet_struct));
     inet_struct *in;
 
-    VARATT_SIZEP(res) = VARHDRSZ + offsetof(inet_struct, INET_IPADDR) + 4;
+    SET_VARSIZE(res, VARHDRSZ + offsetof(inet_struct, INET_IPADDR) + 4);
 
     in = ((inet_struct *)VARDATA(res));
     INET_INIT_CIDR(in);
@@ -1068,7 +1084,7 @@ ip4r_cast_to_cidr(PG_FUNCTION_ARGS)
 	PG_RETURN_NULL();
 
     res = palloc0(VARHDRSZ + sizeof(inet_struct));
-    VARATT_SIZEP(res) = VARHDRSZ + offsetof(inet_struct, INET_IPADDR) + 4;
+    SET_VARSIZE(res, VARHDRSZ + offsetof(inet_struct, INET_IPADDR) + 4);
 
     in = ((inet_struct *)VARDATA(res));
     INET_INIT_CIDR(in);
