@@ -1,4 +1,4 @@
-/* $Id: ip4r.c,v 1.7 2008-01-28 23:15:58 andrewsn Exp $ */
+/* $Id: ip4r.c,v 1.8 2008-01-28 23:18:35 andrewsn Exp $ */
 /*
   New type 'ip4' used to represent a single IPv4 address efficiently
 
@@ -471,11 +471,11 @@ PG_MODULE_MAGIC;
 
 #if IP4R_PGVER >= 8000000
 
-#define INET_STRUCT_PTR(is_) ((is_)->ipaddr)
+#define INET_IPADDR ipaddr
 
 #else /* IP4R_PGVER < 8000000 */
 
-#define INET_STRUCT_PTR(is_) ((is_)->ip_addr)
+#define INET_IPADDR ip_addr
 
 #endif
 
@@ -703,7 +703,7 @@ ip4_cast_from_inet(PG_FUNCTION_ARGS)
 
     if (in->family == PGSQL_AF_INET)
     {
-        unsigned char *p = INET_STRUCT_PTR(in);
+        unsigned char *p = in->INET_IPADDR;
     	IP4 ip = (p[0] << 24)|(p[1] << 16)|(p[2] << 8)|p[3];
 	PG_RETURN_IP4(ip);
     }
@@ -1068,7 +1068,7 @@ ip4r_cast_from_cidr(PG_FUNCTION_ARGS)
 
     if (INET_IS_CIDR(in) && in->family == PGSQL_AF_INET)
     {
-        unsigned char *p = INET_STRUCT_PTR(in);
+        unsigned char *p = in->INET_IPADDR;
     	IP4 ip = (p[0] << 24)|(p[1] << 16)|(p[2] << 8)|p[3];
 	IP4R ipr;
 	if (ip4r_from_cidr(ip, in->bits, &ipr))
