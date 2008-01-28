@@ -1,9 +1,12 @@
-/* $Id: ip4r.c,v 1.6 2008-01-21 02:23:09 andrewsn Exp $ */
+/* $Id: ip4r.c,v 1.7 2008-01-28 23:15:58 andrewsn Exp $ */
 /*
   New type 'ip4' used to represent a single IPv4 address efficiently
 
   New type 'ip4r' used to represent a range of IPv4 addresses, along
   with support for GiST and rtree indexing of the type.
+
+  V1.03: fix the inet conversions which were not handling short varlenas
+  correctly on 8.3
 
   V1.02: updates for 8.3
 
@@ -398,13 +401,25 @@ bool ip4r_extends_right_of_internal(IP4R *left, IP4R *right)
  * needing a full 32-bit length field) and changes the varlena macros
  * to support this. Keep the new interface (which is cleaner than the
  * old one anyway) and emulate it for older versions.
+ *
+ * But for the "inet" type, unlike all other types, 8.3 does not convert
+ * the packed short format back to the unpacked format in the normal
+ * parameter macros. So we need additional macros to hide that change.
+ * We implicitly assume here that none of the fields of 'inet_struct'
+ * require any alignment stricter than byte (which is true at the moment,
+ * but it's anyone's guess whether it will stay true, given how often it
+ * seems to get changed).
  */
 
 #if IP4R_PGVER >= 8003000
-/* nothing */
+
+#define INET_STRUCT_DATA(is_) ((inet_struct *)VARDATA_ANY(is_))
+
 #else /* IP4R_PGVER < 8003000 */
 
 #define SET_VARSIZE(var_,val_) VARATT_SIZEP(var_) = (val_)
+
+#define INET_STRUCT_DATA(is_) ((inet_struct *)VARDATA(is_))
 
 #endif
 
@@ -456,11 +471,11 @@ PG_MODULE_MAGIC;
 
 #if IP4R_PGVER >= 8000000
 
-#define INET_IPADDR ipaddr
+#define INET_STRUCT_PTR(is_) ((is_)->ipaddr)
 
 #else /* IP4R_PGVER < 8000000 */
 
-#define INET_IPADDR ip_addr
+#define INET_STRUCT_PTR(is_) ((is_)->ip_addr)
 
 #endif
 
@@ -684,11 +699,11 @@ Datum
 ip4_cast_from_inet(PG_FUNCTION_ARGS)
 {
     inet *inetptr = PG_GETARG_INET_P(0);
-    inet_struct *in = ((inet_struct *)VARDATA(inetptr));
+    inet_struct *in = INET_STRUCT_DATA(inetptr);
 
     if (in->family == PGSQL_AF_INET)
     {
-        unsigned char *p = in->INET_IPADDR;
+        unsigned char *p = INET_STRUCT_PTR(in);
     	IP4 ip = (p[0] << 24)|(p[1] << 16)|(p[2] << 8)|p[3];
 	PG_RETURN_IP4(ip);
     }
@@ -1049,11 +1064,11 @@ Datum
 ip4r_cast_from_cidr(PG_FUNCTION_ARGS)
 {
     inet *inetptr = PG_GETARG_INET_P(0);
-    inet_struct *in = ((inet_struct *)VARDATA(inetptr));
+    inet_struct *in = INET_STRUCT_DATA(inetptr);
 
     if (INET_IS_CIDR(in) && in->family == PGSQL_AF_INET)
     {
-        unsigned char *p = in->INET_IPADDR;
+        unsigned char *p = INET_STRUCT_PTR(in);
     	IP4 ip = (p[0] << 24)|(p[1] << 16)|(p[2] << 8)|p[3];
 	IP4R ipr;
 	if (ip4r_from_cidr(ip, in->bits, &ipr))
