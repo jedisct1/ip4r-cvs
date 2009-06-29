@@ -737,6 +737,12 @@ CREATE OPERATOR &>> (
 
 -- define the GiST support methods
 
+-- these type declarations are actually wrong for 8.4+ (which added
+-- more args to consistent) but we ignore that because the access
+-- method code doesn't actually look at the function declaration, and
+-- the differences are handled in the C code. Having the SQL
+-- definition changing is just too much of a pain.
+
 CREATE OR REPLACE FUNCTION gip4r_consistent(internal,ip4r,int4)
 RETURNS bool
 AS 'MODULE_PATHNAME'

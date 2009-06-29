@@ -1,9 +1,11 @@
-/* $Id: ip4r.c,v 1.8 2008-01-28 23:18:35 andrewsn Exp $ */
+/* $Id: ip4r.c,v 1.9 2009-06-29 15:17:54 andrewsn Exp $ */
 /*
   New type 'ip4' used to represent a single IPv4 address efficiently
 
   New type 'ip4r' used to represent a range of IPv4 addresses, along
   with support for GiST and rtree indexing of the type.
+
+  V1.04: updates for 8.4
 
   V1.03: fix the inet conversions which were not handling short varlenas
   correctly on 8.3
@@ -395,6 +397,18 @@ bool ip4r_extends_right_of_internal(IP4R *left, IP4R *right)
 
 #if !defined(IP4R_PGVER) || IP4R_PGVER >= 9000000 || IP4R_PGVER < 7003000
 #error "Unknown or unsupported postgresql version"
+#endif
+
+/* 8.4 adds parameters to gist consistent() to support dynamic setting
+ * of the "recheck" flag, and defaults recheck to true (giving us some
+ * performance loss since we don't need recheck).
+ */
+
+#if IP4R_PGVER >= 8004000
+#define IP4R_GIST_HAS_RECHECK
+#define IP4R_GIST_RECHECK_ARG ((bool *) PG_GETARG_POINTER(4))
+#else
+#define IP4R_GIST_RECHECK_ARG (NULL)
 #endif
 
 /* 8.3 changes the varlena header (to support "short" varlenas without
@@ -1529,8 +1543,13 @@ gip4r_consistent(PG_FUNCTION_ARGS)
     GISTENTRY *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
     IP4R *query = (IP4R *) PG_GETARG_POINTER(1);
     StrategyNumber strategy = (StrategyNumber) PG_GETARG_UINT16(2);
+    bool *recheck = IP4R_GIST_RECHECK_ARG;
     IP4R *key = (IP4R *) DatumGetPointer(entry->key);
     bool retval;
+
+    /* recheck is never needed with this type */
+    if (recheck)
+	*recheck = false;
 
     /*
      * * if entry is not leaf, use gip4r_internal_consistent, * else use
