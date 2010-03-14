@@ -358,7 +358,7 @@ SELECT DISTINCT ON (ips.ip) ips.ip, ranges.range
 AUTHORS
 =======
 
-this code by andrew@supernews.net Oct 2004 - Dec 2005
+this code by andrew@tao11.riddles.org.uk Oct 2004 - Dec 2005
 derived from 'ipr' by Steve Atkins <steve@blighty.com> August 2003
 derived from the 'seg' type distributed with PostgreSQL.
 
