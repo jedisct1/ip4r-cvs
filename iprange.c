@@ -1,4 +1,4 @@
-/* $Id: iprange.c,v 1.1 2011-08-03 20:16:03 andrewsn Exp $ */
+/* $Id: iprange.c,v 1.2 2011-08-03 22:08:40 andrewsn Exp $ */
 
 #include "ipr.h"
 
@@ -396,7 +396,7 @@ iprange_hash(PG_FUNCTION_ARGS)
 {
     IPR_P arg1 = PG_GETARG_IPR_P(0);
 
-    return hash_any((unsigned char *) VARDATA(arg1), VARSIZE_ANY_EXHDR(arg1));
+    return hash_any((void *) VARDATA_ANY(arg1), VARSIZE_ANY_EXHDR(arg1));
 }
 
 PG_FUNCTION_INFO_V1(iprange_cast_to_text);
@@ -411,8 +411,7 @@ iprange_cast_to_text(PG_FUNCTION_ARGS)
 	{
 		case 0:
 		{
-			text *out = make_text(NULL,1);
-			*((char*)VARDATA(out)) = '-';
+			text *out = make_text("-",1);
 			PG_RETURN_TEXT_P(out);
 		}
 
@@ -437,7 +436,7 @@ iprange_cast_from_text(PG_FUNCTION_ARGS)
 
     if (tlen < sizeof(buf))
     {
-        memcpy(buf, VARDATA(txt), tlen);
+        memcpy(buf, VARDATA_ANY(txt), tlen);
         buf[tlen] = 0;
 
 		PG_RETURN_DATUM(DirectFunctionCall1(iprange_in, CStringGetDatum(buf)));
