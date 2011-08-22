@@ -1,4 +1,4 @@
-/* $Id: raw_io.c,v 1.1 2011-08-03 20:16:03 andrewsn Exp $ */
+/* $Id: raw_io.c,v 1.2 2011-08-22 14:05:19 andrewsn Exp $ */
 
 /*
  * Copyright (c) 2011 Andrew Gierth
@@ -7,8 +7,6 @@
  */
 
 #include "ipr.h"
-
-PG_MODULE_MAGIC;
 
 bool ip4_raw_input(const char *osrc, uint32 *dst)
 {
@@ -174,6 +172,21 @@ int ip6_raw_output(uint64 *ip, char *str, int len)
 	tmp[6] = ip[1] >> 16;
 	tmp[7] = ip[1];
 
+	/*
+	 * Find the best place to put :: in the output. Per RFC5952, we must:
+	 *  - not use :: to replace a single 0 word
+	 *  - use :: to replace the longest string of 0 words
+	 *  - use :: to replace the leftmost candidate string of equal length
+	 *
+	 * The bitmask we construct here has the least significant bit
+	 * representing the leftmost word, and we process the bitmask by
+	 * shifting right, therefore we are processing the original words
+	 * left to right. Thus we take a new best position only if it is
+	 * strictly better than the previous one.
+	 *
+	 * best = -1  implies that there is no position to use ::
+	 */
+
 	for (i = 0; i < 8; ++i)
 		flags |= (tmp[i] ? (1 << i) : 0);
 	for (i = 0; i < 8; ++i, flags >>= 1)
@@ -182,14 +195,31 @@ int ip6_raw_output(uint64 *ip, char *str, int len)
 
 	best_end = best + best_len - 1;
 
+	/*
+	 * If we're starting with a string of more than one zero word, process
+	 * the special cases:
+	 *
+	 * all zeros (8 zero words) - '::'
+	 * 6 zero words followed by a non-zero word - '::1.2.3.4'
+	 * 5 zero words followed by 0xffff - '::ffff:1.2.3.4'
+	 * 4 zero words followed by ffff:0 - '::ffff:0:1.2.3.4'  [rfc2765]
+	 *
+	 * The case of 7 zero words we leave alone; that avoids trying to output
+	 * '::1' as '::0.0.0.1'. We assume that '0.0.x.y' will never be a valid
+	 * IPv4 address used in an IPv4-compatible IPv6 address (which are in any
+	 * event deprecated).
+	 */
+
 	if (best == 0)
 	{
 		if (best_len == 6
-			|| (best_len == 5 && tmp[5] == 0xffff))
+			|| (best_len == 5 && tmp[5] == 0xffff)
+			|| (best_len == 4 && tmp[4] == 0xffff && tmp[5] == 0))
 		{
 			ip4_raw_output(((uint32)(tmp[6]) << 16) | tmp[7], buf, sizeof(buf)-2);
-			return snprintf(str, len, ":%s:%s",
-							(best_len == 5) ? ":ffff" : "",
+			return snprintf(str, len, ":%s%s:%s",
+							(best_len != 6) ? ":ffff" : "",
+							(best_len == 4) ? ":0" : "",
 							buf);
 		}
 		else if (best_len == 8)
@@ -209,6 +239,14 @@ int ip6_raw_output(uint64 *ip, char *str, int len)
 			*ptr++ = ':';
 
 		word = tmp[i];
+
+		/*
+		 * canonicalization rules:
+		 *
+		 * leading zeros must be suppressed.
+		 * output must be lowercase.
+		 */
+
 		if (!word)
 			*ptr++ = '0';
 		else

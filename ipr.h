@@ -1,4 +1,4 @@
-/* $Id: ipr.h,v 1.1 2011-08-03 20:16:03 andrewsn Exp $ */
+/* $Id: ipr.h,v 1.2 2011-08-22 14:05:19 andrewsn Exp $ */
 
 #include <stdio.h>
 #include "postgres.h"
@@ -130,8 +130,19 @@ typedef void *IPR_P;  /* unaligned! */
 
 /* PG version dependencies */
 
-#if !defined(IP4R_PGVER) || IP4R_PGVER < 8001000
+/* now that we don't support pre-8.1, we can try and determine the pg
+ * version without needing our own compile hack.
+ *
+ * PG_VERSION_NUM starts at 8.2; we distinguish 8.1 from 8.0 and before
+ * by checking for BKI_BOOSTRAP (defined in postgres.h)
+ */
+
+#if !defined(PG_VERSION_NUM)
+#ifdef BKI_BOOSTRAP
+#define PG_VERSION_NUM 80100
+#else
 #error "Unknown or unsupported postgresql version"
+#endif
 #endif
 
 /* 9.0 has no known changes from 8.4 that affect this code. */
@@ -141,7 +152,7 @@ typedef void *IPR_P;  /* unaligned! */
  * performance loss since we don't need recheck).
  */
 
-#if IP4R_PGVER >= 8004000
+#if PG_VERSION_NUM >= 80400
 #define GIST_HAS_RECHECK
 #define GIST_RECHECK_ARG ((bool *) PG_GETARG_POINTER(4))
 #else
@@ -168,7 +179,7 @@ typedef void *IPR_P;  /* unaligned! */
 
 #define INET_STRUCT_DATA(is_) ((inet_struct *)VARDATA_ANY(is_))
 
-#if IP4R_PGVER < 8003000
+#if PG_VERSION_NUM < 80300
 
 #define VARDATA_ANY(v_) VARDATA(v_)
 #define VARSIZE_ANY_EXHDR(v_) (VARSIZE(v_) - VARHDRSZ)
@@ -181,7 +192,7 @@ typedef void *IPR_P;  /* unaligned! */
 
 /* PG_MODULE_MAGIC was introduced in 8.2. */
 
-#if IP4R_PGVER < 8002000
+#if PG_VERSION_NUM < 80200
 #define PG_MODULE_MAGIC extern int no_such_variable
 #endif
 
@@ -189,12 +200,12 @@ typedef void *IPR_P;  /* unaligned! */
  * always redundant
  */
 
-#if IP4R_PGVER >= 8002000
+#if PG_VERSION_NUM >= 80200
 
 #define INET_INIT_CIDR(i)
 #define INET_IS_CIDR(i) (1)
 
-#else /* IP4R_PGVER < 8002000 */
+#else /* PG_VERSION_NUM < 80200 */
 
 #define INET_INIT_CIDR(i) ((i)->type = 1)
 #define INET_IS_CIDR(i) ((i)->type)
@@ -218,6 +229,7 @@ Datum ip4_cast_to_cidr(PG_FUNCTION_ARGS);
 Datum ip4_cast_to_bigint(PG_FUNCTION_ARGS);
 Datum ip4_cast_to_numeric(PG_FUNCTION_ARGS);
 Datum ip4_cast_from_bigint(PG_FUNCTION_ARGS);
+Datum ip4_cast_from_numeric(PG_FUNCTION_ARGS);
 Datum ip4_cast_to_double(PG_FUNCTION_ARGS);
 Datum ip4_cast_from_double(PG_FUNCTION_ARGS);
 Datum ip4r_in(PG_FUNCTION_ARGS);
@@ -272,6 +284,7 @@ Datum ip4_contained_by(PG_FUNCTION_ARGS);
 Datum ip4r_union(PG_FUNCTION_ARGS);
 Datum ip4r_inter(PG_FUNCTION_ARGS);
 Datum ip4r_size(PG_FUNCTION_ARGS);
+Datum ip4r_size_exact(PG_FUNCTION_ARGS);
 Datum ip4r_prefixlen(PG_FUNCTION_ARGS);
 Datum ip4r_cmp(PG_FUNCTION_ARGS);
 Datum ip4_cmp(PG_FUNCTION_ARGS);
@@ -341,6 +354,7 @@ Datum ip6_contained_by(PG_FUNCTION_ARGS);
 Datum ip6r_union(PG_FUNCTION_ARGS);
 Datum ip6r_inter(PG_FUNCTION_ARGS);
 Datum ip6r_size(PG_FUNCTION_ARGS);
+Datum ip6r_size_exact(PG_FUNCTION_ARGS);
 Datum ip6r_prefixlen(PG_FUNCTION_ARGS);
 Datum ip6r_cmp(PG_FUNCTION_ARGS);
 Datum ip6_cmp(PG_FUNCTION_ARGS);
@@ -395,6 +409,10 @@ Datum iprange_cast_to_cidr(PG_FUNCTION_ARGS);
 Datum iprange_cast_from_ip4(PG_FUNCTION_ARGS);
 Datum iprange_cast_from_ip6(PG_FUNCTION_ARGS);
 Datum iprange_cast_from_ipaddr(PG_FUNCTION_ARGS);
+Datum iprange_cast_from_ip4r(PG_FUNCTION_ARGS);
+Datum iprange_cast_from_ip6r(PG_FUNCTION_ARGS);
+Datum iprange_cast_to_ip4r(PG_FUNCTION_ARGS);
+Datum iprange_cast_to_ip6r(PG_FUNCTION_ARGS);
 Datum iprange_from_ip4s(PG_FUNCTION_ARGS);
 Datum iprange_from_ip6s(PG_FUNCTION_ARGS);
 Datum iprange_from_ipaddrs(PG_FUNCTION_ARGS);
@@ -428,6 +446,7 @@ Datum iprange_ip6_contained_by(PG_FUNCTION_ARGS);
 Datum iprange_union(PG_FUNCTION_ARGS);
 Datum iprange_inter(PG_FUNCTION_ARGS);
 Datum iprange_size(PG_FUNCTION_ARGS);
+Datum iprange_size_exact(PG_FUNCTION_ARGS);
 Datum iprange_prefixlen(PG_FUNCTION_ARGS);
 Datum iprange_cmp(PG_FUNCTION_ARGS);
 

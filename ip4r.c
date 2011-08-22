@@ -1,4 +1,4 @@
-/* $Id: ip4r.c,v 1.11 2011-08-03 20:16:03 andrewsn Exp $ */
+/* $Id: ip4r.c,v 1.12 2011-08-22 14:05:19 andrewsn Exp $ */
 
 #include "ipr.h"
 
@@ -54,7 +54,7 @@ bool ip4r_from_str(char *str, IP4R *ipr)
             unsigned pfxlen;
             char dummy;
 
-            if (pos > sizeof(buf)-2)
+            if (pos >= sizeof(buf))
                 return FALSE;
             memcpy(buf, str, pos);
             buf[pos] = 0;
@@ -289,6 +289,12 @@ Datum
 ip4_cast_from_bigint(PG_FUNCTION_ARGS)
 {
     int64 val = PG_GETARG_INT64(0);
+
+	if (val < -(int64)0x80000000UL || val > (int64)0xFFFFFFFFUL)
+        ereport(ERROR,
+                (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                 errmsg("ip address out of range")));
+
     PG_RETURN_IP4(val);
 }
 
@@ -314,7 +320,27 @@ ip4_cast_from_double(PG_FUNCTION_ARGS)
                  errmsg("double converted to IP4 is not integral")));
     }
 
+	if (ival < -(float8)0x80000000UL || ival > (float8)0xFFFFFFFFUL)
+        ereport(ERROR,
+                (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                 errmsg("ip address out of range")));
+
     PG_RETURN_IP4((unsigned long) ival);
+}
+
+PG_FUNCTION_INFO_V1(ip4_cast_from_numeric);
+Datum
+ip4_cast_from_numeric(PG_FUNCTION_ARGS)
+{
+    Datum val_num = PG_GETARG_DATUM(0);
+	int64 val = DatumGetInt64(DirectFunctionCall1(numeric_int8,val_num));
+
+	if (val < -(int64)0x80000000UL || val > (int64)0xFFFFFFFFUL)
+        ereport(ERROR,
+                (errcode(ERRCODE_NUMERIC_VALUE_OUT_OF_RANGE),
+                 errmsg("ip address out of range")));
+
+    PG_RETURN_IP4((unsigned long) val);
 }
 
 PG_FUNCTION_INFO_V1(ip4_netmask);
@@ -984,6 +1010,14 @@ ip4r_size(PG_FUNCTION_ARGS)
 {
     double size = ip4r_metric(PG_GETARG_IP4R_P(0));
     PG_RETURN_FLOAT8(size);
+}
+
+PG_FUNCTION_INFO_V1(ip4r_size_exact);
+Datum
+ip4r_size_exact(PG_FUNCTION_ARGS)
+{
+    int64 size = (int64) ip4r_metric(PG_GETARG_IP4R_P(0));
+	PG_RETURN_DATUM(DirectFunctionCall1(int8_numeric, Int64GetDatumFast(size)));
 }
 
 PG_FUNCTION_INFO_V1(ip4r_prefixlen);

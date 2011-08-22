@@ -1,4 +1,4 @@
-/* $Id: ip6r.c,v 1.1 2011-08-03 20:16:03 andrewsn Exp $ */
+/* $Id: ip6r.c,v 1.2 2011-08-22 14:05:19 andrewsn Exp $ */
 
 #include "ipr.h"
 
@@ -1152,6 +1152,18 @@ ip6r_size(PG_FUNCTION_ARGS)
 {
     double size = ip6r_metric(PG_GETARG_IP6R_P(0));
     PG_RETURN_FLOAT8(size);
+}
+
+PG_FUNCTION_INFO_V1(ip6r_size_exact);
+Datum
+ip6r_size_exact(PG_FUNCTION_ARGS)
+{
+	IP6R *ipr = PG_GETARG_IP6R_P(0);
+	Datum l = DirectFunctionCall1(ip6_cast_to_numeric, IP6PGetDatum(&ipr->lower));
+	Datum u = DirectFunctionCall1(ip6_cast_to_numeric, IP6PGetDatum(&ipr->upper));
+	Datum d = DirectFunctionCall2(numeric_sub, u, l);
+	Datum s = DirectFunctionCall1(numeric_inc, d);
+	PG_RETURN_DATUM(s);
 }
 
 PG_FUNCTION_INFO_V1(ip6r_prefixlen);
