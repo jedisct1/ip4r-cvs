@@ -1,4 +1,4 @@
-/* $Id: iprange.c,v 1.3 2011-08-22 14:05:19 andrewsn Exp $ */
+/* $Id: iprange.c,v 1.4 2011-11-02 07:47:24 andrewsn Exp $ */
 
 #include "ipr.h"
 
@@ -1443,6 +1443,9 @@ iprange_size_exact(PG_FUNCTION_ARGS)
 			l = DirectFunctionCall1(ip6_cast_to_numeric, IP6PGetDatum(&ipr.ip6r.lower));
 			u = DirectFunctionCall1(ip6_cast_to_numeric, IP6PGetDatum(&ipr.ip6r.upper));
 			break;
+
+		default:
+			iprange_internal_error();
 	}
 
 	d = DirectFunctionCall2(numeric_sub, u, l);
