@@ -2012,9 +2012,9 @@ select * from ipranges where r4 >> '172.16.2.0/28' order by r4;
 select * from ipaddrs where a between '8.0.0.0' and '15.0.0.0' order by a;
 select * from ipaddrs where a4 between '8.0.0.0' and '15.0.0.0' order by a4;
 
-select * from ipaddrs a join ipranges r on (r.r >>= a.a);
-select * from ipaddrs a join ipranges r on (r.r4 >>= a.a4);
-select * from ipaddrs a join ipranges r on (r.r6 >>= a.a6);
+select * from ipaddrs a join ipranges r on (r.r >>= a.a) order by a,r;
+select * from ipaddrs a join ipranges r on (r.r4 >>= a.a4) order by a4,r4;
+select * from ipaddrs a join ipranges r on (r.r6 >>= a.a6) order by a6,r6;
 
 -- hashing
 
