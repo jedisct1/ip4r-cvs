@@ -1,6 +1,16 @@
 
-IP4R  - IPv4 and IPv4 range index type for PostgreSQL
-=====================================================
+IP4R  - IPv4/v6 and IPv4/v6 range index type for PostgreSQL
+===========================================================
+
+CHANGES from version 1.x:
+=========================
+
+ * Support for PostgreSQL versions older than 8.1 is REMOVED
+
+ * New types for ip6, ip6r, ipaddress, iprange
+
+ * ip4 input no longer accepts spurious leading whitespace
+
 
 RATIONALE
 =========
@@ -23,10 +33,14 @@ length types (to support ipv6) with non-trivial overheads, and the
 authors (whose applications mainly deal in large volumes of single
 IPv4 addresses) wanted a more lightweight representation.
 
-IP4R therefore supports two distinct data types (so far):
+IP4R therefore supports six distinct data types:
 
   ip4   - a single IPv4 address
   ip4r  - an arbitrary range of IPv4 addresses
+  ip6   - a single IPv6 address
+  ip6r  - an arbitrary range of IPv6 addresses
+  ipaddress  - a single IPv4 or IPv6 address
+  iprange    - an arbitrary range of IPv4 or IPv6 addresses
 
 Simple usage examples:
 
@@ -63,21 +77,23 @@ SELECT DISTINCT ON (ip) ip,range,description
 INSTALLATION
 ============
 
-On version 8.0 or later of PostgreSQL, ip4r can be installed via the
-pgxs mechanism. Unpack the distribution and do:
+ip4r can be installed via the pgxs mechanism (which is now the default).
+Unpack the distribution and do:
 
-make USE_PGXS=1
-make USE_PGXS=1 install
+make
+make install
 
 (as with PostgreSQL itself, this requires GNU Make. The second command
 will usually need to be run as root.)
 
-On versions prior to 8.0, first unpack the PostgreSQL distribution
-itself, and run ./configure with the same parameters you used when
-installing PostgreSQL originally. If you installed from a binary
-package, you will have to discover what options the packager used.
-Then create a subdirectory contrib/ip4r and copy the contents of
-the ip4r distribution there, and run make install.
+If for some reason you can't install via pgxs, then the module will
+still build in the old-school way under contrib/. First unpack the
+PostgreSQL distribution itself, and run ./configure with the same
+parameters you used when installing PostgreSQL originally. If you
+installed from a binary package, you will have to discover what
+options the packager used.  Then create a subdirectory contrib/ip4r
+and copy the contents of the ip4r distribution there, and run make
+install.
 
 Installing via either of the above methods creates the ip4r.so module,
 and installs an SQL script ip4r.sql in the usual place for contrib
@@ -102,147 +118,192 @@ schema.  This can be changed by editing the ip4r.sql file.
 USAGE
 =====
 
-Type "ip4"
-----------
+Types "ip4", "ip6", "ipaddress"
+-------------------------------
 
-ip4 accepts input in the form 'nnn.nnn.nnn.nnn' in decimal base only
+"ip4" accepts input in the form 'nnn.nnn.nnn.nnn' in decimal base only
 (no hex, octal, etc.).  An ip4 value is a single IP address, and is
 stored as a 32-bit unsigned integer.
 
-ip4 supports the following type conversions:
+"ip6" accepts input in the standard hexadecimal representation for IPv6
+addresses, e.g. '2001:1234:aa55::2323'. An ip6 value is a single IP
+address, and is stored as two 64-bit values for convenience. Output is
+always in the canonical form of the hexadecimal representation.
 
-  Source type   | Dest type |  Form
-----------------|-----------|----------------------------------------------
-  ip4           |  text     |  text(ip4)  or  ip4::text  (explicit)
-  text          |  ip4      |  ip4(text)  or  text::ip4  (explicit)
-  ip4           |  cidr     |  cidr(ip4)  or  ip4::cidr  (assignment)
-  inet          |  ip4      |  ip4(inet)  or  inet::ip4  (assignment)
-  ip4           |  bigint   |  to_bigint(ip4)  or  ip4::bigint  (explicit)
-  bigint        |  ip4      |  ip4(bigint)     or  bigint::ip4  (explicit)
-  ip4           |  float8   |  to_double(ip4)  or  ip4::float8  (explicit)
-  float8        |  ip4      |  ip4(float8)     or  float8::ip4  (explicit)
-  ip4           |  ip4r     |  ip4r(ip4)  or  ip4::ip4r  (implicit)
+"ipaddress" accepts any input which is valid for either ip4 or ip6. An
+ipaddress value is a single IP address, either v4 or v6. The v4 and v6
+ranges are treated as disjoint - all v4 addresses are considered lower
+than all v6 addresses, and '1.2.3.4' and '::ffff:1.2.3.4' are not equal.
 
-The conversions from bigint and float8 accept values which are exact
-integers in the range 0 .. 2^32-1, which are converted to IPs in the
-range 0.0.0.0 - 255.255.255.255 in the obvious way. This is useful for
-conversions from applications which store IPs in numeric form, as is
-often done for performance in certain other databases.
+"ipX" will be used below to represent any of the above three types.
 
-The conversion to cidr always results in a /32. The conversion from
-inet ignores any prefix length and just takes the specific IP address.
+The following type conversions are supported:
 
-An ip4 value implicitly converts to an ip4r range containing only the
-single IP address.
+  Source type   | Dest type  |  Form
+----------------|------------|------------------------------------------------
+  ipX           |  text      |  text(ipX)  or  ipX::text  (explicit)
+  text          |  ipX       |  ipX(text)  or  text::ipX  (explicit)
+  ipX           |  cidr      |  cidr(ipX)  or  ipX::cidr  (assignment)
+  inet          |  ipX       |  ipX(inet)  or  inet::ipX  (assignment)
+  ipX           |  numeric   |  to_numeric(ipX) or  ipX::numeric (explicit)
+  numeric       |  ipX       |  ipX(numeric)    or  bigint::ipX  (explicit)
+  ip4           |  bigint    |  to_bigint(ip4)  or  ip4::bigint  (explicit)
+  bigint        |  ip4       |  ip4(bigint)     or  bigint::ip4  (explicit)
+  ip4           |  float8    |  to_double(ip4)  or  ip4::float8  (explicit)
+  float8        |  ip4       |  ip4(float8)     or  float8::ip4  (explicit)
+  ipX           |  ipXr      |  ipXr(ipX)  or  ipX::ipXr  (implicit)
+  ip4           |  ipaddress |  ipaddress(ip4)  or  ip4::ipaddress (implicit)
+  ip6           |  ipaddress |  ipaddress(ip6)  or  ip6::ipaddress (implicit)
+  ipaddress     |  ip4       |  ip4(ipaddress)  or  ipaddress::ip4 (explicit)
+  ipaddress     |  ip6       |  ip6(ipaddress)  or  ipaddress::ip6 (explicit)
 
-ip4 supports the following operators with the conventional meanings:
+The conversions from bigint and float8 are available only for ip4, and
+accept values which are exact integers in the range 0 .. 2^32-1, which
+are converted to IPs in the range 0.0.0.0 - 255.255.255.255 in the
+obvious way. This is useful for conversions from applications which
+store IPs in numeric form, as is often done for performance in certain
+other databases.
+
+Conversions to and from the 'numeric' type are available for all
+formats with the obvious behaviour.
+
+The conversion to cidr always results in a /32 (for v4) or /128 (for v6).
+The conversion from inet ignores any prefix length and just takes the
+specific IP address.
+
+An ipX value implicitly converts to either the corresponding range
+type (ip4 -> ip4r, ip6 -> ip6r), or to the iprange type, producing a
+range containing only the single IP address.
+
+ipX supports the following operators with the conventional meanings:
 =, <>, <, >, <=, >=, and supports ORDER BY and btree indexes in the
 obvious fashion. However, the planner does not understand how to
 transform a query of the form
 
-  WHERE ip4column <<= value
+  WHERE ipcolumn <<= value
 
 into a btree range scan (it does this transformation for the builtin
 inet type using a function which is not extensible by plugins). As a
 workaround, use the following form instead:
 
-  WHERE ip4column BETWEEN lower(value) AND upper(value)
+  WHERE ipcolumn BETWEEN lower(value) AND upper(value)
 
 which will use a btree range scan.
 
-ip4 supports the following additional operators and functions:
+ipX supports the following additional operators and functions:
+
+ family(ipX) returns integer
+ | returns the value 4 or 6 depending on address family
 
  ip4_netmask(integer) returns ip4
  | returns an ip4 value that represents a netmask for a prefix length
 
- ip4_net_lower(ip4, integer) returns ip4
+ ip6_netmask(integer) returns ip6
+ | returns an ip6 value that represents a netmask for a prefix length
+
+ ipX_net_lower(ipX, integer) returns ipX
  | returns the lowest address in the cidr block of the specified prefix
  | length, containing the specified IP
- | equivalent to: network(set_masklen(cidr(ip4),integer))
+ | equivalent to: network(set_masklen(cidr(ipX),integer))
 
- ip4_net_upper(ip4, integer) returns ip4
+ ipX_net_upper(ipX, integer) returns ipX
  | returns the highest address in the cidr block of the specified prefix
  | length, containing the specified IP
  | equivalent to: broadcast(set_masklen(cidr(ip4),integer))
 
   Operator        | Description
 ------------------|--------------------------------------------------------
- ip4 + integer    | add the given integer to the IP 
- ip4 - integer    | subtract the given integer from the IP 
- ip4 + bigint     | add the given integer to the IP 
- ip4 - bigint     | subtract the given integer from the IP 
- ip4 - ip4        | (returns bigint) difference between two IPs
- ip4 & ip4        | bitwise-AND the two values
- ip4 | ip4        | bitwise-OR the two values
- ip4 # ip4        | bitwise-XOR the two values
- ~ ip4            | bitwise-NOT the value
+ ipX + integer    | add the given integer to the IP 
+ ipX - integer    | subtract the given integer from the IP 
+ ipX + bigint     | add the given integer to the IP 
+ ipX - bigint     | subtract the given integer from the IP 
+ ipX + numeric    | add the given integer to the IP 
+ ipX - numeric    | subtract the given integer from the IP 
+ ipX - ipX        | (returns bigint or numeric) difference between two IPs
+ ipX & ipX        | bitwise-AND the two values
+ ipX | ipX        | bitwise-OR the two values
+ ipX # ipX        | bitwise-XOR the two values
+ ~ ipX            | bitwise-NOT the value
 
 Arithmetic on ip4 values does not wrap below 0.0.0.0 or above
 255.255.255.255 - attempting to go beyond these limits raises an
 error.
 
 More complex arithmetic on IP addresses can be performed by converting
-the IPs to bigint first; the above are only intended to cover the
+the IPs to numeric first; the above are only intended to cover the
 common cases without requiring casts.
 
 
-Type "ip4r"
------------
+Types "ip4r", "ip6r", "iprange"
+-------------------------------
 
-An ip4r value denotes a single range of one or more IP addresses,
+An "ip4r" value denotes a single range of one or more IPv4 addresses,
 for example '192.0.2.100-192.0.2.200'. Arbitrary ranges are allowed,
 though input can also be in the form of CIDR netblocks, e.g.
 '192.0.2.0/24' is equivalent to '192.0.2.0-192.0.2.255'. A single
 value such as '192.0.2.25' represents a range containing only that
 value.
 
-Values are displayed in CIDR form if they represent a CIDR range,
-otherwise in range form.
+An "ip6r" value denotes a single range of one or more IPv6 addresses,
+for example '2001::1234-2001::2000:0000'. Arbitrary ranges are
+allowed, though input can also be in the form of CIDR netblocks, e.g.
+'2001::/112' is equivalent to '2001::-2001::ffff'. A single value such
+as '2001::1234' represents a range containing only that value. Output
+is in canonical form.
 
-Currently, abbreviated CIDR forms are not accepted at all, i.e. all
-four octets must be supplied.
+An "iprange" value denotes either an IPv4 range or an IPv6 range, or
+the special value '-' which includes all of both IPv4 and IPv6 space.
+Mixing of address families is not otherwise supported.
 
-An ip4r value can be constructed from two IPs explicitly using the
-function ip4r(ip4,ip4). The ends of the range can be specified in
+For all of the above types, values are displayed in CIDR form if they
+represent a CIDR range, otherwise in range form.
+
+Currently, abbreviated CIDR forms for IPv4 are not accepted at all,
+i.e. all octets must be supplied. For IPv6, words may only be omitted
+from the address as permitted by the format specification.
+
+"ipXr" will be used below to represent any one of the above three types.
+
+An ipXr value can be constructed from two IPs explicitly using the
+function ipXr(ipX,ipX). The ends of the range can be specified in
 either order.
 
-An ip4r value can be constructed from an IP and a prefix length
-using the function ip4r_net_prefix(ip4,integer), or from an IP
-and a netmask using the function ip4r_net_mask(ip4,ip4). In the
-latter case, non-contiguous netmasks will be rejected.
+An ipXr value can be constructed from an IP and a prefix length
+using the / operator (see below). For backward compatibility, the
+function names ipXr_net_prefix and ipXr_net_mask are still accepted
+for this operator.
 
-ip4r supports the following type conversions:
+ipXr supports the following type conversions:
 
   Source type   | Dest type |  Form
 ----------------|-----------|----------------------------------------------
-  ip4           |  ip4r     |  ip4r(ip4)  or  ip4::ip4r  (implicit)
-  ip4r          |  text     |  text(ip4r) or  ip4r::text (explicit)
-  text          |  ip4r     |  ip4r(text) or  text::ip4r (explicit)
-  ip4r          |  cidr     |  cidr(ip4r) or  ip4r::cidr (explicit)
-  cidr          |  ip4r     |  ip4r(cidr) or  cidr::ip4r (assignment)
+  ipX           |  ipXr     |  ipXr(ipX)  or  ipX::ipXr  (implicit)
+  ipXr          |  text     |  text(ipXr) or  ipXr::text (explicit)
+  text          |  ipXr     |  ipXr(text) or  text::ipXr (explicit)
+  ipXr          |  cidr     |  cidr(ipXr) or  ipXr::cidr (explicit)
+  cidr          |  ipXr     |  ipXr(cidr) or  cidr::ipXr (assignment)
 
-The conversion cidr(ip4r) returns NULL if the ip4r value does not
+The conversion cidr(ipXr) returns NULL if the ipXr value does not
 represent a valid CIDR range.
 
-ip4r supports the following functions:
+In addition, type conversions between ip4r, ip6r and iprange are permitted
+in all valid combinations.
 
-  is_cidr(ip4r) returns boolean
-  |  returns TRUE if the ip4r value is a valid CIDR range
+ipXr supports the following functions:
 
-  lower(ip4r) returns ip4
-  |  returns the lower end of the ip4r range, as an ip4 value
+  family(ipXr) returns integer
+  |  returns 4 or 6 according to address family, or NULL for '-'::iprange
 
-  upper(ip4r) returns ip4
-  |  returns the upper end of the ip4r range, as an ip4 value
+  is_cidr(ipXr) returns boolean
+  |  returns TRUE if the ipXr value is a valid CIDR range
 
-  ip4r_size(ip4r) returns double precision
-  |  returns the number of IP addresses in the range
+  lower(ipXr) returns ipX
+  |  returns the lower end of the ipXr range, as an ipX value
 
-An ip4r value can also be subscripted with [0] and [1] with the
-same effect as lower() and upper(), though this isn't encouraged
-(it won't be supported for future ip6 range types).
+  upper(ipXr) returns ipX
+  |  returns the upper end of the ipXr range, as an ipX value
 
-ip4r supports the following operators:
+ipXr supports the following operators:
 
   Operator        | Description
 ------------------|--------------------------------------------------------
@@ -257,62 +318,53 @@ ip4r supports the following operators:
   a <<= b         | a is contained in b or is equal to b
   a << b          | a is strictly contained in b
   a && b          | a and b overlap
-  a <<< b         | strictly less than, note [2]
-  a &<< b         | note [2]
-  a >>> b         | strictly greater than, note [2]
-  a &>> b         | note [2]
-
-For historical reasons @ is equivalent to >>=, and ~ is equivalent
-to <<=, but use of these is not recommended in new code.
+  @ a             | approximate size of a (returns double)
+  @@ a            | exact size of a (returns numeric)
+  a / n           | construct CIDR range from address a length n
+  a / b           | construct CIDR range from address a netmask b
 
 [1]: the operators <, <=, >, >= implement an ordering for the purposes of
 btree indexes, DISTINCT and ORDER BY; the ordering is not necessarily
 useful for applications. The ordering used is a lexicographic ordering
 of (lower,upper).
 
-[2]: the operators <<<, &<<, >>> and &>> exist to satisfy the requirements
-for an rtree index. (a <<< b) if all IPs contained in a are strictly less
-than all IPs contained in b, and similarly for (a >>> b). The semantics of
-&<< and &>>, unfortunately, are different between different releases of
-PostgreSQL due to changes in the rtree infrastructure, and so their use in
-applications is not recommended.
-
-For testing whether an ip4r range contains a specified single ip, use the
->>= operator, i.e.  ip4r >>= ip4.  The implicit conversion from ip4 to ip4r
+For testing whether an ipXr range contains a specified single ip, use the
+>>= operator, i.e.  ipXr >>= ipX.  The implicit conversion from ipX to ipXr
 handles this case.
 
 
-ip4r Indexes
+ipXr Indexes
 ------------
 
-ip4r values can be indexed in several ways.
+ipXr values can be indexed in several ways.
 
-A conventional btree index on ip4r values will work for the purposes of
+A conventional btree index on ipXr values will work for the purposes of
 unique/primary key constraints, ordering, and equality lookups (i.e.
 WHERE column = value). Btree indexes are created in the usual way and
 are the default index type.
 
-However, ip4r's utility comes from its ability to use gist (or rtree)
-indexes to support the following lookup types:
+However, ipXr's utility comes from its ability to use gist indexes to
+support the following lookup types:
 
   WHERE column >>= value      (or >>)
   WHERE column <<= value      (or <<)
   WHERE column && value
 
-These lookups require a GiST index (or rtree, though with PostgreSQL
-8.1 or later, rtree should be considered deprecated). This can be
-created as follows:
+These lookups require a GiST index. This can be created as follows:
 
 CREATE INDEX indexname ON tablename USING gist (column);
 
 It is also possible to create a functional ip4r index over a column of
 'cidr' type as follows:
 
-CREATE INDEX indexname ON tablename USING gist (ip4r(cidrcolumn));
+CREATE INDEX indexname ON tablename USING gist (iprange(cidrcolumn));
+
+(ip4r(column) or ip6r(column) can also be used if the column is constrained
+to contain only values of the specified address family)
 
 This can then be used for queries of the form:
 
-  WHERE ip4r(cidrcolumn) >>= value    (or >>, <<=, && etc)
+  WHERE iprange(cidrcolumn) >>= value    (or >>, <<=, && etc)
 
 One advantage of this method is that the ip4r type can be dropped and
 recreated without losing data. This is useful for accelerating queries
@@ -335,15 +387,22 @@ and then doing queries of the form:
 
   WHERE ip4r(column1::ip4,column2::ip4) >>= value
 
+This method is not usually practical for IPv6.
+
 A common requirement is to get the longest-prefix (most specific)
 match to an IP address from a table of ranges or CIDR prefixes.
-This can usually be best achieved using ORDER BY ip4r_size(column),
+This can usually be best achieved using ORDER BY @ column,
 for example:
 
 SELECT * FROM tablename
  WHERE column >>= value
- ORDER BY ip4r_size(column)
+ ORDER BY @ column
  LIMIT 1
+
+The use of @ column (approximate size) is sufficient if the values are
+IPv4 ranges or are always CIDR prefixes. If arbitrary IPv6 ranges are
+present, then overlapping ranges with small size differences might
+compare equal; in this case use ORDER BY @@ column.
 
 When looking up multiple IPs, one can do queries of the following
 form:
@@ -351,14 +410,14 @@ form:
 SELECT DISTINCT ON (ips.ip) ips.ip, ranges.range
   FROM ips, ranges
  WHERE ranges.range >>= ips.ip
- ORDER BY ips.ip, ip4r_size(ranges.range)
+ ORDER BY ips.ip, @ ranges.range
 
 
 
 AUTHORS
 =======
 
-this code by andrew@tao11.riddles.org.uk Oct 2004 - Dec 2005
+this code by andrew@tao11.riddles.org.uk Oct 2004 - Nov 2011
 derived from 'ipr' by Steve Atkins <steve@blighty.com> August 2003
 derived from the 'seg' type distributed with PostgreSQL.
 
