@@ -868,32 +868,6 @@ RETURNS internal
 AS 'MODULE_PATHNAME'
 LANGUAGE C;
 
-SELECT case s when 'panic' then 'ignore following ROLLBACK'
-              else 'creating rtree opclass'
-       end
-  FROM set_config('client_min_messages',
-                  case when substring(version()
-                                      from 'PostgreSQL ([0-9]+[.][0-9]+)')
-                              ~ '^(7[.][34]|8[.][01])$'
-                       then 'notice'
-                       else 'panic' end,
-                  true) as s;
-
-CREATE OPERATOR CLASS rtree_ip4r_ops
-DEFAULT FOR TYPE ip4r USING rtree
-AS
-	OPERATOR	1	<<< ,
-	OPERATOR	2	&<< ,
-	OPERATOR	3	&& ,
-	OPERATOR	4	&>> ,
-	OPERATOR	5	>>> ,
-	OPERATOR	6	= ,
-	OPERATOR	7	>>= ,
-	OPERATOR	8	<<= ,
-	FUNCTION	1	rt_ip4r_union(internal, internal),
-	FUNCTION	2	rt_ip4r_inter(internal, internal),
-	FUNCTION	3	rt_ip4r_size(ip4r, internal);
-
 COMMIT;
 
 -- end
